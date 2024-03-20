@@ -2,8 +2,8 @@
 ## 模型加速方法概述
 
 - [网络模型设计]
-- [模型剪枝简介](/docs/Model_Accelaration/模型量化简介.md)
-- [模型量化简介]
+- [模型剪枝简介]()
+- [模型量化简介](/docs/Model_Accelaration/模型量化简介.md)
 - [NAS]
 
 ## 方法实现
