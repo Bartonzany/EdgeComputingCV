@@ -34,4 +34,6 @@
 
 ### 博客
 
+
+（这个在文档已添加链接）
 - [深度学习算法优化系列十一 | 折叠Batch Normalization](https://zhuanlan.zhihu.com/p/107913057)
