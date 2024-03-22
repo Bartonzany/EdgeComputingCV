@@ -4,11 +4,13 @@
 - [网络模型设计]
 - [模型剪枝简介]()
 - [模型量化简介](/docs/Model_Accelaration/模型量化简介.md)
-- [NAS]
+- [网络搜索]
 
 ## 方法实现
 
 ### 轻量化网络
+
+### 知识蒸馏
 
 ### 模型剪枝
 
@@ -17,6 +19,10 @@
 #### 量化感知训练
 
 #### 后训练量化
+
+#### Data Free
+
+- [A Survey of Quantization Methods for Efficient Neural Network Inference](https://arxiv.org/abs/2103.13630) 里面有介绍
 
 ## 深度学习算法优化
 
