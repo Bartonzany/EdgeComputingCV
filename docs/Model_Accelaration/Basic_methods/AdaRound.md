@@ -128,7 +128,7 @@ $$H^{(w)} = E[x^{(l-1)}x^{(l-1)^T} \otimes \nabla^2_{z^{(l)}} \zeta] \tag{14}$$
 
 最后得到简化后的优化目标: 
 
-$$\underset{\widehat{w}}{argmin} \: E[(\Delta wx)^2] \tag{15}$$
+$$\underset{\widehat{w}}{argmin} E[(\Delta wx)^2] \tag{15}$$
 
 #### NP 复杂度
 
@@ -139,12 +139,12 @@ $$\underset{\widehat{w}}{argmin} \: E[(\Delta wx)^2] \tag{15}$$
 AdaRound 方法核心思想是：**既然离散空间不好优化，那就把它松弛成连续空间**。即可以把公式 (15) 替换成:
 
 $$\begin{align*}
-\underset{v}{argmin} \: ||wx - \tilde{w}x||^2_F + \lambda f_{reg}(v) \tag{16} \\
+\underset{v}{argmin} ||wx - \tilde{w}x||^2_F + \lambda f_{reg}(v) \tag{16} \\
 \tilde{w} = s \times clamp(\lfloor \frac{w}{s} \rfloor + h(v);n,p) \tag{17} \\  
 \end{align*}
 $$
 
-$||wx - \hat{w}x||^2_F$ 表示两个特征矩阵之间的 Frobenius 范数，可以就简单把它当作公式 (15) 中的目标函数，使用 n 和 p 来表示整数网格限制 ($n = \frac{q_{min}}{s}$ 和 $p = \frac{q_{max}}{s}$)，另新引入辅助函数 $f_{reg}$。现在，需要优化的变量就不再是 $\widehat{w}$ 而是新变量 $v$，而后者是一个连续的变量，可用的优化方法更多。$\tilde{w}$ 虽然也是带了量化误差的权重，但相比之前的 $\hat{w}$，这里面 round 部分只向下取整，通过 $h(v)$ 来调整最终取整的策略。$h(v)$ 是一个数值范围在 $(0,1)$ 之间的函数，定义为：
+$||wx - \hat{w}x||^2_F$ 表示两个特征矩阵之间的 Frobenius 范数，可以就简单把它当作公式 (15) 中的目标函数，使用 n 和 p 来表示整数网格限制 ($n = \frac{q_{min}}{s}$ 和 $p = \frac{q_{max}}{s}$)，另新引入辅助函数 $f_{reg}$。现在，需要优化的变量就不再是 $\widehat{w}$ 而是新变量 $v$，而后者是一个连续的变量，可用的优化方法更多。 $\tilde{w}$ 虽然也是带了量化误差的权重，但相比之前的 $\hat{w}$，这里面 round 部分只向下取整，通过 $h(v)$ 来调整最终取整的策略。 $h(v)$ 是一个数值范围在 $(0,1)$ 之间的函数，定义为：
 
 $$h(v) = clip(\sigma(v)(\zeta - \gamma) + \gamma,0,1) \tag{18}$$
 
@@ -186,4 +186,4 @@ $$f_{reg}(v) = \sum_{i,j}(1 - |2h(v_{i,j}) - 1|^\beta) \tag{19}$$
 ### 博客 Blogs
 
 - [AdaRound，一种全新的量化思路--问题篇 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/473815530)
-- 
+- [AdaRound，一种全新的量化思路--解决篇 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/473820133)
