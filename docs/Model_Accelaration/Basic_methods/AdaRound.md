@@ -105,9 +105,64 @@ $$\underset{\widehat{w}}{argmin} \: E[\frac{1}{2} \Delta w^T H^{(w)} \Delta w] \
 
 ### 从泰勒级数到损失函数 From Taylor expansion to local loss
 
-#### Hessian矩阵计算
+#### Hessian 矩阵计算
 
 首先第一个难点, **$H^{(w)}$ Hessian 矩阵计算复杂**。假设有一个一层的全连接网络，由于全连接层就是一个矩阵乘法，因此输出为 $z=wx$。那么，对于二阶导，它的计算方式是：
+
+$$\begin{align*}
+H^{(w)} &= \nabla_w^2L(w) \\
+&= \frac {\partial}{\partial w}[\frac {\partial L}{\partial z} \frac {\partial z}{\partial w}] \quad (先求一阶导) \\
+&= \frac {\partial}{\partial w}[\frac {\partial L}{\partial z}]x \\
+&= \frac{\frac {\partial L}{\partial z}}{\partial z} \frac {\partial z}{\partial w}x \quad (用
+一阶导对w继续求二阶导) \\
+&= \frac {\partial^2 L}{\partial z \partial z}xx \tag{13}
+\end{align*}$$
+
+论文中的公式为:
+
+$$H^{(w)} = E[x^{(l-1)}x^{(l-1)^T} \otimes \nabla^2_{z^{(l)}} \zeta] \tag{14}$$
+
+这个公式中，计算比较复杂的是 $\nabla^2_z L$，它是 Loss 函数对网络中间每一层的特征求二阶导。反向传播 BP 是需要逐层求导计算的，如果网络的层数比较多，这个计算过程就会很复杂。因此，论文做了一个假设: **$\nabla^2_z L$ 是一个对角阵**，即矩阵中除了对角线上有数值外，其他位置的数值都是 0。不过，这样计算上还是很复杂，因此论文又做了进一步假设: **$\nabla^2_z L_{i,i} = c_i$，即这个对角阵中的元素都是常数**，这样它跟公式 (12) 的优化就没有关系了，可以直接丢掉。基于这两个假设, $H^{(w)}$ 可以直接去掉: 
+
+![Hessian Decomposes Into Independent Sub-problem](/images/Model_Accelaration/Hessian%20Decomposes%20Into%20Independent%20Sub-problem.png)
+
+最后得到简化后的优化目标: 
+
+$$\underset{\widehat{w}}{argmin} \: E[(\Delta wx)^2] \tag{15}$$
+
+#### NP 复杂度
+
+前面虽然对优化目标简化了很多，但如果想直接优化还是存在很多困难的。**问题的关键就在于求解空间 $\widehat{w}$ 是离散的 (只有 $w^{floor}$, $w^{ceil}$ 两个解)，没法直接通过数学优化的方式求出最优解，只能暴力枚举所有的解，然后找出优化目标最小的解**。但神经网络的参数量巨大 (现代神经网络都是几十上百万的参数)，求解空间非常巨大，是一个 NP-Hard 难度的问题 (计算机也要算很久很久很久)。因此不能用一般方法解决这个求解问题。
+
+### AdaRound
+
+AdaRound 方法核心思想是：**既然离散空间不好优化，那就把它松弛成连续空间**。即可以把公式 (15) 替换成:
+
+$$\begin{align*}
+\underset{v}{argmin} \: ||wx - \tilde{w}x||^2_F + \lambda f_{reg}(v) \tag{16} \\
+\tilde{w} = s \times clamp(\lfloor \frac{w}{s} \rfloor + h(v);n,p) \tag{17} \\  
+\end{align*}
+$$
+
+$||wx - \hat{w}x||^2_F$ 表示两个特征矩阵之间的 Frobenius 范数，可以就简单把它当作公式 (15) 中的目标函数，使用 n 和 p 来表示整数网格限制 ($n = \frac{q_{min}}{s}$ 和 $p = \frac{q_{max}}{s}$)，另新引入辅助函数 $f_{reg}$。现在，需要优化的变量就不再是 $\widehat{w}$ 而是新变量 $v$，而后者是一个连续的变量，可用的优化方法更多。$\tilde{w}$ 虽然也是带了量化误差的权重，但相比之前的 $\hat{w}$，这里面 round 部分只向下取整，通过 $h(v)$ 来调整最终取整的策略。$h(v)$ 是一个数值范围在 $(0,1)$ 之间的函数，定义为：
+
+$$h(v) = clip(\sigma(v)(\zeta - \gamma) + \gamma,0,1) \tag{18}$$
+
+其中 $\sigma$ 是 sigmoid 函数, $h(v)$ 其实就是 sigmoid 函数的变体，它和 sigmoid 的函数图像如下：
+
+![AdaRound取值函数](/images/Model_Accelaration/AdaRound取值函数.png)
+
+$h(v)$ 和 sigmoid 的区别就是，$h(v)$ 在 $(0,1)$ 之间的部分梯度都比较抖，没有 sigmoid 那种平滑的走势。这种设计方式**可以避免 $h(v)$ 在需要优化的区域出现梯度弥散或消失的问题**。
+
+再来看看 $f_{reg}$ 函数，图像如下图所示:
+
+$$f_{reg}(v) = \sum_{i,j}(1 - |2h(v_{i,j}) - 1|^\beta) \tag{19}$$
+
+![AdaRound取值函数2](/images/Model_Accelaration/AdaRound取值函数2.png)
+
+
+
+
 
 
 
