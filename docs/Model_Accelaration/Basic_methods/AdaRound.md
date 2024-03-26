@@ -93,7 +93,7 @@ w^{floor} = s[clamp(round(\lfloor{\frac ws}\rceil+z);0,2^b-1)-z] \tag{10}  \\
 w^{ceil} = s[clamp(round(\lfloor{\frac ws}\rceil+z);0,2^b-1)-z] \tag{11}  
 \end{align*}$$
 
-$\widehat{w} \in \left \{ w^{floor}, w^{ceil} \right\}$, $\Delta w = w - \widehat{w}$，再结合前面的分析，可以把问题建模成:
+$\widehat{w} \in [w^{floor}, w^{ceil}]$, $\Delta w = w - \widehat{w}$，再结合前面的分析，可以把问题建模成:
 
 $$\underset{\widehat{w}}{argmin} \: E[\frac{1}{2} \Delta w^T H^{(w)} \Delta w] \tag{12}$$
 
