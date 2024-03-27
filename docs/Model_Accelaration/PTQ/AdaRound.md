@@ -72,7 +72,7 @@ $$\Delta w^T H^{(w)} \Delta w = \Delta w_1^2 + \Delta w_2^2 + \Delta w_1 \Delta 
 
 对于 $\Delta w_1 $ 和 $\Delta w_2$，四舍五入的 round 一定是最优的，因为四舍五入带来的 $\Delta w$ 在数值上是最小的。但对于 $\Delta w_1 \Delta w_2$，情况就跟它们的符号有比较大的关系。如果它们符号不同，相乘后数值就是负的，相当于公式 (7) 反而变小了，这样模型的量化误差也是减小的。而四舍五入并不能保证这一点。
 
-## 研究目的 Research Objective
+## 研究目标 Research Objective
 
 寻找到最好的 Round 函数权重取舍机制，更高效的用于后训练量化，简化流程并优化准确性而无需进行大量微调参数。
 
@@ -152,38 +152,67 @@ $$h(v) = clip(\sigma(v)(\zeta - \gamma) + \gamma,0,1) \tag{18}$$
 
 ![AdaRound取值函数](/images/Model_Accelaration/AdaRound取值函数.png)
 
-$h(v)$ 和 sigmoid 的区别就是，$h(v)$ 在 $(0,1)$ 之间的部分梯度都比较抖，没有 sigmoid 那种平滑的走势。这种设计方式**可以避免 $h(v)$ 在需要优化的区域出现梯度弥散或消失的问题**。
+$h(v)$ 和 sigmoid 的区别就是， $h(v)$ 在 $(0,1)$ 之间的部分梯度都比较抖，没有 sigmoid 那种平滑的走势。这种设计方式**可以避免 $h(v)$ 在需要优化的区域出现梯度弥散或消失的问题**。
 
-再来看看 $f_{reg}$ 函数，图像如下图所示:
+再来看看 $f_{reg}$ 函数，图像如下图所示 (不同 $\beta$ 值对函数影响不同):
 
 $$f_{reg}(v) = \sum_{i,j}(1 - |2h(v_{i,j}) - 1|^\beta) \tag{19}$$
 
 ![AdaRound取值函数2](/images/Model_Accelaration/AdaRound取值函数2.png)
 
+现在分析如何最小化公式 (16) 的大小。对于 $||wx - \hat{w}x||^2_F$，$\hat{w}$ 中的 round 函数已经被松弛成连续的情况，但要保证 round 只能向上取整或者向下取整。由于 $h(v)$ 取值范围是 $(0,1)$， $\hat{w}$ 取值在区间 $[w^{floor}, w^{ceil}]$。要使 $\hat{w}$ 最终在 $w^{floor} w^{ceil}$ 中的一个，则需要观察 $f_{reg}$ 的图像。由上图可知， $f_{reg}$ 只有在 $h(v) = 0$ 或者 $h(v) =1$ 时，函数值才会等于 0。故只有最小化 $f_{reg}$，最后求解出来的 $h(v)$ 就是 0 或者 1， $\hat{w}$ 最后就会收敛到 $w^{floor} w^{ceil}$ 中的一个。
 
+**$f_{reg}$ 在优化的过程中， $\beta$ 值需要从大到小慢慢调小**。在 $\beta$ 比较大的时候， $f_{reg}$ 有大片区域是比较平坦，该区域的梯度也比较小，即 $h(v)$ 最开始可以无限制向两边扩展，此时优化的主要是量化误差损失 $||wx - \hat{w}x||^2_F$。之后慢慢调小 $\beta$， $f_{reg}$ 平坦区域就越来越小，数值小于 0.5 的 $h(v)$ 就会往左边 0 的位置收敛，反之，则往右边 1 的位置靠拢。这种设计的好处是在最开始优化的时， $h(v)$ 可以自由地移动，不必拘泥于 $f_{reg}$ ，从而**把更多的优化空间留给量化误差损失。**
 
+论文分析了优化前后 $h(v)$ 的变化。在优化前， $h(v)$ 是按照 nearest round 的方式初始化的，优化后 $h(v)$ 的情况发生了较大的变化。比如，如果是采用 nearest round，那么小于 0.5 的点 (横坐标)，应该都是要 round 到 0 的 (纵坐标)，而大于 0.5 的应该 round 到 1。但从图中发现，横坐标大于 0.5 的点，也有部分会被 round 到 0。这就说明，对于 AdaRound 来说，四舍五入未必是最优解。
 
+![Adaround h(v)的变化](/images/Model_Accelaration/Adaround%20h(v)的变化.png)
 
+#### 算法流程
 
+AdaRound 是逐层顺序优化的，类似于 Bias Correction。首先，先对 $L-1$ 层进行优化。优化后把 $L-1$ 层的参数都用 AdaRound 求出来的最优解进行量化，并以此为基础对网络跑一遍前向推理直到 $L$ 层，然后继续用 AdaRound 优化，以此类推。这种逐层顺序优化的方法，**可以保证在优化 $L$ 层的时候，已经充分考虑了前面层的量化误差。**
 
+此外，为了防止激活函数会方法量化误差，论文建议在优化的时候，把激活函数的影响也考虑进去：
 
+$$\underset{v}{argmin} ||f_a(wx) - f_a(\tilde{w}x)||^2_F + \lambda f_{reg}(v) \tag{20}$$
 
-
-
-
-
-
-
+即优化目标里面的量化损失部分，需要再包括激活函数后再计算
 
 ## 实验 Evaluation
 
+论文使用 Adam 来优化作为 AdaRound 的优化器，以下是几个实验结果：
+
+### 对比 Nearest rounding
+
+论文针对 resnet18 这个通用的网络，在 ImageNet 上做了分类的实验。表格里的 First layer 表示只对第一层卷积做量化。首先，Nearest rounding 和其他方法相比差了 10 个点。其次，把 $H^{(w)}$ 扔掉的强假设，似乎并没有什么影响 (**Local MSE loss** v.s **$H^{(w)}$ task loss**)。第三，对目标进行松弛的方法也比直接暴力搜索的方式更有优势 (**Cont. relaxation** v.s. **Local MSE Loss**)，而且 **Cont. relaxation** 省时省力。
+
+![Adaround优化算法对比](/images/Model_Accelaration/Adaround优化算法对比.png)
+
+### 和直通估计器 (STE) 对比 Optimization using STE
+
+其实 AdaRound 的目标函数 (公式 (16)) 是可以直接和 STE 结合进行量化训练的。因此论文也对比了用量化训练来优化该目标的效果。AdaRound 比 STE 优化的方式提高了两个点。论文解释说是量化训练的梯度带有一些 bias，从而影响了优化。
+
+![Adaround和STE对比](/images/Model_Accelaration/Adaround和STE对比.png)
+
+### 对训练数据的鲁棒性 Influence of quantization grid 
+
+AdaRound 相比其他量化算法，需要进行小规模的训练，并且优化目标也更加复杂一些。因此研究数据样本对算法可能产生的影响，可以比较好地表现这个算法的稳定性。论文用了不同数据集的数据来优化 AdaRound，并对比了它们在 ImageNet 分类准确性上的效果。结果说明，用了跨数据集的数据并不会明显影响 AdaRound 的效果
+
+![Adaround在不同数据集上的表现](/images/Model_Accelaration/Adaround在不同数据集上的表现.png)
+
 ## 结论 Conclusion
+
+AdaRound 本身带来的提升也很大，几乎是离线量化的基准 baseline 。在之后的后量化训练算法中，不少是针对 AdaRound 进行改进优化的。因此搞懂这篇文章，对之后的学习也大有益处。
 
 ## 参考引用 Reference
 
 ### 论文地址 Papers
 
+- [Up or Down? Adaptive Rounding for Post-Training Quantization (arxiv.org)](https://arxiv.org/abs/2004.10568)
+
 ### 博客 Blogs
 
 - [AdaRound，一种全新的量化思路--问题篇 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/473815530)
 - [AdaRound，一种全新的量化思路--解决篇 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/473820133)
+- [AdaRound：一种自适应调整round的模型后量化算法 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/363941822)
+- [AdaRound：训练后量化的自适应舍入-CSDN博客](https://blog.csdn.net/u012347027/article/details/114667698)
