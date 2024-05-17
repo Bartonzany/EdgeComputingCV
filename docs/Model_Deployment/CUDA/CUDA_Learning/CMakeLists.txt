@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+Project(CUDA_OPERATORS CXX C CUDA)
+set(CMAKE_CUDA_FLAGS "-arch=compute_35 -g -G -O3")
+add_subdirectory(0_hello_world)
+add_subdirectory(1_thread_index)
+add_subdirectory(6_MatAdd_operator)
+add_subdirectory(10_device_information)

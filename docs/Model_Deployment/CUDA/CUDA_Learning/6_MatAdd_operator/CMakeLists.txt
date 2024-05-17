@@ -1,0 +1,1 @@
+add_executable(MatAdd_op MatAdd_op.cu)

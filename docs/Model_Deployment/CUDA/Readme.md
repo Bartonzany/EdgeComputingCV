@@ -141,6 +141,8 @@ CPU和GPU线程的区别：
 
 ### 1.5 CUDA Hello World
 
+代码在文件夹 0_hello_world.cu 中
+
 ```C
 #include<stdio.h>
 
@@ -165,7 +167,7 @@ __global__
 ```
 hello_world<<<1,10>>>();
 ```
-这句话C语言中没有’<<<>>>’是对设备进行配置的参数，也是CUDA扩展出来的部分。在调用时需要用<<<grid, block>>>来指定kernel要执行的线程数量
+这句话C语言中没有’<<<>>>’是对设备进行配置的参数，也是CUDA扩展出来的部分。在调用时需要用<<<grid, block>>>来指定kernel要执行的线程数量。
 
 ```
 cudaDeviceReset();
@@ -180,7 +182,7 @@ cudaDeviceReset();
 - 将device上的运算结果拷贝到host上；
 - 释放device和host上分配的内存。
 
-## 2 CUDA 编程模型
+## 2 CUDA 编程模型 CUDA Programming Model
 
 ### 2.1 概念 Concepts
 
@@ -394,7 +396,7 @@ kernel_function<<<grid, block>>>(argument list);
 CHECK(cudaDeviceSynchronize());
 ```
 
-### 给核函数计时 Timing Your Kernel
+### 2.6 给核函数计时 Timing Your Kernel
 
 使用cpu计时的方法是测试时间的一个常用办法，在写C程序的时候最多使用的计时方法是：
 
@@ -453,6 +455,306 @@ nvprof [nvprof_args] <application>[application_args]
 ![nvprof](/images/Model_Deployment/nvprof.png)
 
 工具不仅给出了kernel执行的时间，比例，还有其他cuda函数的执行时间，可以看出核函数执行时间只有6%左右，其他内存分配，内存拷贝占了大部分事件，nvprof给出的核函数执行时间2.8985ms，cpuSecond计时结果是37.62ms。可见，nvprof可能更接近真实值。
+
+### 2.7 组织并行线程 Organizing Parallel Threads
+
+由 2.3 节的 CUDA 索引计算，可以使用以下代码打印每个线程的标号信息，代码在 1_thread_index 中：
+
+```C
+#include <cuda_runtime.h>
+#include <stdio.h>
+
+__global__ void thread_index_kernel(float *A, const int num_x, const int num_y) {
+    int index_x = blockIdx.x * blockDim.x + threadIdx.x;
+    int index_y = blockIdx.y * blockDim.y + threadIdx.y;
+    int idx = index_y * num_x + index_x;
+
+    // Ensure we are within the bounds of the array
+    if (index_x < num_x && index_y < num_y) {
+        printf("thread_id: (%d, %d) block_id: (%d, %d) coordinate: (%d, %d) global index: %2d val: %f\n",
+                threadIdx.x, threadIdx.y, blockIdx.x, blockIdx.y, index_x, index_y, idx, A[idx]);
+    }
+}
+
+void printMatrix(float * C,const int nx,const int ny) {
+    float *ic=C;
+    printf("Matrix<%d,%d>:\n",ny,nx);
+
+    for(int i=0;i<ny;i++) {
+        for(int j=0;j<nx;j++) {
+            printf("%6f ",ic[j]);
+        }
+        
+        ic+=nx;
+        printf("\n");
+    }
+}
+
+int main(int argc, char** argv) {
+    int nx = 8, ny = 6;
+    int nxy = nx * ny;
+    int nBytes = nxy * sizeof(float);
+
+    // Allocate memory on the host
+    float* A_host = (float*)malloc(nBytes);
+
+    // Initialize host array with some values
+    for (int i = 0; i < nxy; ++i) {
+        A_host[i] = static_cast<float>(rand()) / RAND_MAX; // Assign random float values between 0 and 1
+    }
+    printMatrix(A_host, nx, ny);
+
+    // Allocate memory on the device
+    float *A_dev = NULL;
+    cudaMalloc((void**)&A_dev, nBytes);
+
+    // Copy data from host to device
+    cudaMemcpy(A_dev, A_host, nBytes, cudaMemcpyHostToDevice);
+
+    // Define block and grid dimensions
+    dim3 block(4, 2);
+    dim3 grid((nx + block.x - 1) / block.x, (ny + block.y - 1) / block.y);
+
+    // Launch the kernel
+    thread_index_kernel<<<grid, block>>>(A_dev, nx, ny);
+    cudaDeviceSynchronize(); // Ensure kernel execution is complete
+
+    // Free device memory
+    cudaFree(A_dev);
+
+    // Free host memory
+    free(A_host);
+
+    cudaDeviceReset();
+    return 0;
+}
+```
+
+由以上例子，可以得出二维矩阵加法核函数：
+
+```C
+__global__ void MatrixAdd(float * MatA, float * MatB, float * MatC, const int num_x, const int num_y) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = col * num_x + row;
+
+    if (row < num_x && col < num_y) {
+        MatC[idx] = MatA[idx] + MatB[idx];
+    }
+}
+```
+
+下面调整不同的线程组织形式，测试一下不同的效率并保证得到正确的结果，但是什么时候得到最好的效率是后面要考虑的，我们要做的就是用各种不同的相乘组织形式得到正确结果的，代码在 6_MatAdd.cu 中。
+
+首先来看**二维网格二维模块**的代码：
+
+```C
+dim3 blockDim_2(dim_x);
+dim3 gridDim_2((row + blockDim_2.x - 1) / blockDim_2.x, col);
+iStart = cpuSecond();
+MatrixAdd<<<gridDim_2, blockDim_2>>>(A_dev, B_dev, C_dev, row, col); // 调用 CUDA 核函数
+cudaDeviceSynchronize();
+iElaps=cpuSecond() - iStart;
+printf("GPU Execution configuration<<<(%d, %d),(%d, %d)>>> Time elapsed %f sec\n",
+        gridDim_2.x, gridDim_2.y, blockDim_2.x, blockDim_2.y, iElaps);
+cudaMemcpy(C_host, C_dev, nBytes, cudaMemcpyDeviceToHost); // 将计算结果从设备端拷贝到主机端
+```
+
+运行结果：
+```shell
+GPU Execution configuration<<<(128, 128),(32, 32)>>> Time elapsed 0.005439 sec
+```
+
+接着使用**一维网格一维块**：
+
+```C
+dim3 blockDim_1(dim_x);
+dim3 gridDim_1((sum + blockDim_1.x - 1) / blockDim_1.x);
+iStart = cpuSecond();
+MatrixAdd<<<gridDim_1, blockDim_1>>>(A_dev, B_dev, C_dev, sum, 1); // 调用 CUDA 核函数
+cudaDeviceSynchronize();
+iElaps=cpuSecond() - iStart;
+printf("GPU Execution configuration<<<(%d, %d),(%d, %d)>>> Time elapsed %f sec\n",
+        gridDim_1.x, gridDim_1.y, blockDim_1.x, blockDim_1.y, iElaps);
+cudaMemcpy(C_host, C_dev, nBytes, cudaMemcpyDeviceToHost); // 将计算结果从设备端拷贝到主机端
+```
+
+运行结果：
+```shell
+GPU Execution configuration<<<(524288, 1),(32, 1)>>> Time elapsed 0.003211 sec
+```
+
+**二维网格一维块**：
+
+```C
+dim3 blockDim_2(dim_x);
+dim3 gridDim_2((row + blockDim_2.x - 1) / blockDim_2.x, col);
+iStart = cpuSecond();
+MatrixAdd<<<gridDim_2, blockDim_2>>>(A_dev, B_dev, C_dev, row, col); // 调用 CUDA 核函数
+cudaDeviceSynchronize();
+iElaps=cpuSecond() - iStart;
+printf("GPU Execution configuration<<<(%d, %d),(%d, %d)>>> Time elapsed %f sec\n",
+        gridDim_2.x, gridDim_2.y, blockDim_2.x, blockDim_2.y, iElaps);
+cudaMemcpy(C_host, C_dev, nBytes, cudaMemcpyDeviceToHost); // 将计算结果从设备端拷贝到主机端
+```
+
+运行结果：
+```shell
+GPU Execution configuration<<<(128, 4096),(32, 1)>>> Time elapsed 0.007409 sec
+```
+
+用不同的线程组织形式会得到正确结果，但是效率有所区别：
+
+| 线程配置        | 执行时间      |
+| -------------- | ------------- |
+| (128,128),(32,32) | 0.002152      |
+| (524288,1),(32,1) | 0.002965      |
+| (128,4096),(32,1) | 0.002965      |
+
+观察结果没有多大差距，而且最主要的是用不同的线程组织模式都得到了正确结果，并且：
+
+- 改变执行配置（线程组织）能得到不同的性能
+- 传统的核函数可能不能得到最好的效果
+- 一个给定的核函数，通过调整网格和线程块大小可以得到更好的效果
+
+### 2.8 GPU设备信息 Managing Devices
+
+用 CUDA 的时候一般有两种情况，一种自己写完自己用，使用本机或者已经确定的服务器，这时候只要查看说明书或者配置说明就知道用的什么型号的GPU，以及GPU的所有信息，但是如果写的程序是通用的程序或者框架，在使用 CUDA 前要先确定当前的硬件环境，这使得我们的程序不那么容易因为设备不同而崩溃，本文介绍两种方法，第一种适用于通用程序或者框架，第二种适合查询本机或者可登陆的服务器，并且一般不会改变，那么这时候用一条 nvidia 驱动提供的指令查询设备信息就很方便了。
+
+使用代码 10_device_information.cu 可以查询到以下信息：
+
+```shell
+./device_information Starting ...
+Detected 1 CUDA Capable device(s)
+Device 0:"NVIDIA GeForce GTX 1060 6GB"
+  CUDA Driver Version / Runtime Version         12.2  /  11.5
+  CUDA Capability Major/Minor version number:   6.1
+  Total amount of global memory:                5.93 GBytes (6367543296 bytes)
+  GPU Clock rate:                               1848 MHz (1.85 GHz)
+  Memory Bus width:                             192-bits
+  L2 Cache Size:                                1572864 bytes
+  Max Texture Dimension Size (x,y,z)            1D=(131072),2D=(131072,65536),3D=(16384,16384,16384)
+  Max Layered Texture Size (dim) x layers       1D=(32768) x 2048,2D=(32768,32768) x 2048
+  Total amount of constant memory               65536 bytes
+  Total amount of shared memory per block:      49152 bytes
+  Total number of registers available per block:65536
+  Wrap size:                                    32
+  Maximun number of thread per multiprocesser:  2048
+  Maximun number of thread per block:           1024
+  Maximun size of each dimension of a block:    1024 x 1024 x 64
+  Maximun size of each dimension of a grid:     2147483647 x 65535 x 65535
+  Maximu memory pitch                           2147483647 bytes
+----------------------------------------------------------
+Number of multiprocessors:                      10
+Total amount of constant memory:                64.00 KB
+Total amount of shared memory per block:        48.00 KB
+Total number of registers available per block:  65536
+Warp size                                       32
+Maximum number of threads per block:            1024
+Maximum number of threads per multiprocessor:  2048
+Maximum number of warps per multiprocessor:     64
+```
+
+主要用到了下面API，了解API的功能最好不要看博客，因为博客不会与时俱进，要查文档，所以对于API的不了解，解决办法：查文档，查文档，查文档！
+
+```shell
+cudaSetDevice
+cudaGetDeviceProperties
+cudaDriverGetVersion
+cudaRuntimeGetVersion
+cudaGetDeviceCount
+```
+
+这里面很多参数是后面要介绍的，而且每一个都对性能有影响：
+
+1. CUDA驱动版本
+2. 设备计算能力编号
+3. 全局内存大小（5.93G）
+4. GPU主频
+5. GPU带宽
+6. L2缓存大小
+7. 纹理维度最大值，不同维度下的
+8. 层叠纹理维度最大值
+9. 常量内存大小
+10. 块内共享内存大小
+11. 块内寄存器大小
+12. 线程束大小
+13. 每个处理器硬件处理的最大线程数
+14. 每个块处理的最大线程数
+15. 块的最大尺寸
+16. 网格的最大尺寸
+17. 最大连续线性内存
+
+上面这些都是后面要用到的关键参数，这些会严重影响效率。后面会一一说到，不同的设备参数要按照不同的参数来使得程序效率最大化，所以必须在程序运行前得到所有关心的参数。
+
+也可以使用 nvidia-smi nvidia驱动程序内带的一个工具返回当前环境的设备信息：
+
+```shell
+Fri May 17 22:16:50 2024       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.171.04             Driver Version: 535.171.04   CUDA Version: 12.2     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  NVIDIA GeForce GTX 1060 6GB    Off | 00000000:2B:00.0 Off |                  N/A |
+|106%   37C    P8               9W / 200W |     15MiB /  6144MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|    0   N/A  N/A      1198      G   /usr/lib/xorg/Xorg                            9MiB |
+|    0   N/A  N/A      1479      G   /usr/bin/gnome-shell                          2MiB |
++---------------------------------------------------------------------------------------+
+```
+
+也可以使用其他参数：
+
+```shell
+nvidia-smi -L
+nvidia-smi -q -i 0
+nvidia-smi -q -i 0 -d MEMORY | tail -n 5
+nvidia-smi -q -i 0 -d UTILIZATION | tail -n 4
+```
+
+下面这些nvidia-smi -q -i 0 的参数可以提取我们要的信息
+
+- MEMORY
+- UTILIZATION
+- ECC
+- TEMPERATURE
+- POWER
+- CLOCK
+- COMPUTE
+- PIDS
+- PERFORMANCE
+- SUPPORTED_CLOCKS
+- PAGE_RETIREMENT
+- ACCOUNTING
+
+至此，CUDA 的编程模型大概就是这些了，核函数，计时，内存，线程，设备参数，这些足够能写出比CPU块很多的程序了。从下一章开始，深入硬件研究背后的秘密
+
+## 3 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
