@@ -1,0 +1,1 @@
+/usr/lib/nvidia-cuda-toolkit/bin/g++ CMakeFiles/device_information.dir/device_information.cu.o -o device_information  -lcudadevrt -lcudart_static -lrt -lpthread -ldl  -L"/usr/lib/x86_64-linux-gnu/stubs" -L"/usr/lib/x86_64-linux-gnu"
