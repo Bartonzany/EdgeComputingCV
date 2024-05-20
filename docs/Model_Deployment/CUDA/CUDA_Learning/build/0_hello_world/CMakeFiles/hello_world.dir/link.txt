@@ -1,1 +1,0 @@
-/usr/lib/nvidia-cuda-toolkit/bin/g++ CMakeFiles/hello_world.dir/hello_world.cu.o -o hello_world  -lcudadevrt -lcudart_static -lrt -lpthread -ldl  -L"/usr/lib/x86_64-linux-gnu/stubs" -L"/usr/lib/x86_64-linux-gnu"

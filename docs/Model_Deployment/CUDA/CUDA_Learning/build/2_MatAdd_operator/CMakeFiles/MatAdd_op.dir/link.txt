@@ -1,1 +1,0 @@
-/usr/lib/nvidia-cuda-toolkit/bin/g++ CMakeFiles/MatAdd_op.dir/MatAdd_op.cu.o -o MatAdd_op  -lcudadevrt -lcudart_static -lrt -lpthread -ldl  -L"/usr/lib/x86_64-linux-gnu/stubs" -L"/usr/lib/x86_64-linux-gnu"
