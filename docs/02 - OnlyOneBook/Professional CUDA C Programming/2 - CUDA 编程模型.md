@@ -1677,3 +1677,5 @@ nvidia-smi -q -i 0 -d UTILIZATION | tail -n 4  # 利用率
 ### 网页链接
 
 - [人工智能编程 | 谭升的博客](https://face2ai.com/program-blog/)
+- [CUDA学习入门（三） CUDA线程索引 & 如何设置Gridsize和Blocksize](https://blog.csdn.net/weixin_44222088/article/details/135732160)
+- [CUDA线程模型与全局索引计算方式](https://zhuanlan.zhihu.com/p/666077650)
