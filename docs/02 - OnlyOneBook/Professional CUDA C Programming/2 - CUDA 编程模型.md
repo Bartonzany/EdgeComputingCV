@@ -1259,8 +1259,8 @@ int main(int argc, char** argv) {
     printf("strating...\n");
     int dev = 0;
     cudaSetDevice(dev);
-    int row    = 1 << 14;    // 2^12, 16384
-    int col    = 1 << 14;    // 2^12, 16384
+    int row    = 1 << 14;    // 2^12, 4096
+    int col    = 1 << 14;    // 2^12, 4096
     int sum    = row * col;
     int nBytes = sum * sizeof(float);
 

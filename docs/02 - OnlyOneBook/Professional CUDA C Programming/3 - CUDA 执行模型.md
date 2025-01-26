@@ -776,7 +776,7 @@ __syncthread();
 
 ### 3. 并行性表现 Exposing Parallelism
 
-本节的主要内容就是进一步理解线程束在硬件上执行的本质过程，结合上几篇关于执行模型的学习，本文相对简单，通过修改核函数的配置，来观察核函数的执行速度，以及分析硬件利用数据，分析性能。调整核函数配置是CUDA开发人员必须掌握的技能，本篇只研究对核函数的配置是如何影响效率的（也就是通过网格，块的配置来获得不同的执行效率。）
+本节的主要内容就是进一步理解线程束在硬件上执行的本质过程，结合上几节关于执行模型的学习，本文相对简单，通过修改核函数的配置，来观察核函数的执行速度，以及分析硬件利用数据，分析性能。调整核函数配置是CUDA开发人员必须掌握的技能，本篇只研究对核函数的配置是如何影响效率的（也就是通过网格，块的配置来获得不同的执行效率。）
 
 本节只用到下面的核函数:
 
@@ -792,46 +792,154 @@ __global__ void sumMatrix(float * MatA, float * MatB, float * MatC, const int nu
 }
 ```
 
-没有任何优化的最简单的二维矩阵加法，代码在 5_sum_matrix2D 中。这里用两个 $8192×8192
-$ 的矩阵相加来测试效率。注意一下这里的GPU内存，一个矩阵是 $2^{14}×2^{14}×2^2=2^{30}$ 字节 也就是 1G，三个矩阵就是 3G。 
+没有任何优化的最简单的二维矩阵加法，代码在 chapter03/sumMatrix2D.cu 中。
 
-#### 用 nvprof 检测活跃的线程束 Checking Active Warps with nvprof
+```C
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include "../common/common.h"
+
+void sumMatrix2D_CPU(float* MatA, float* MatB, float* MatC, const int num_x, const int num_y) {
+    float* a = MatA;
+    float* b = MatB;
+    float* c = MatC;
+
+    for (int j = 0; j < num_y; j++) {
+        for (int i = 0; i < num_x; i++) {
+            c[i] = a[i] + b[i];
+        }
+
+        c += num_x;
+        b += num_x;
+        a += num_x;
+    }
+}
+
+__global__ void sumMatrix(float* MatA, float* MatB, float* MatC, const int num_x, const int num_y) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = col * num_x + row;
+
+    if (row < num_x && col < num_y) {
+        MatC[idx] = MatA[idx] + MatB[idx];
+    }
+}
+
+int main(int argc, char** argv) {
+    printf("strating...\n");
+    int dev = 0;
+    cudaSetDevice(dev);
+    int row    = 1 << 12;    // 2^12, 16384
+    int col    = 1 << 12;    // 2^12, 16384
+    int sum    = row * col;
+    int nBytes = sum * sizeof(float);
+
+    // Malloc
+    float* A_host     = (float*)malloc(nBytes);
+    float* B_host     = (float*)malloc(nBytes);
+    float* C_host     = (float*)malloc(nBytes);
+    float* C_from_gpu = (float*)malloc(nBytes);
+
+    // 为输入矩阵赋值
+    initialData(A_host, sum);
+    initialData(B_host, sum);
+
+    // 输出矩阵，分配设备端内存
+    float* A_dev = NULL;
+    float* B_dev = NULL;
+    float* C_dev = NULL;
+    CHECK(cudaMalloc((void**)&A_dev, nBytes));
+    CHECK(cudaMalloc((void**)&B_dev, nBytes));
+    CHECK(cudaMalloc((void**)&C_dev, nBytes));
+
+    // 将输入数据从主机端拷贝到设备端
+    CHECK(cudaMemcpy(A_dev, A_host, nBytes, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(B_dev, B_host, nBytes, cudaMemcpyHostToDevice));
+
+    int    dim_x  = argc > 2 ? atoi(argv[1]) : 32;
+    int    dim_y  = argc > 2 ? atoi(argv[2]) : 32;
+    double iStart = 0.0;
+    double iElaps = 0.0;
+
+    // cpu compute
+    cudaMemcpy(C_from_gpu, C_dev, nBytes, cudaMemcpyDeviceToHost);
+    iStart = cpuSecond();
+    sumMatrix2D_CPU(A_host, B_host, C_host, row, col);
+    iElaps = cpuSecond() - iStart;
+    printf("CPU Execution Time elapsed %f sec\n", iElaps);
+
+    // 2d block and 2d grid
+    dim3 blockDim_0(dim_x, dim_y);
+    dim3 gridDim_0((row + blockDim_0.x - 1) / blockDim_0.x, (col + blockDim_0.y - 1) / blockDim_0.y);
+    iStart = cpuSecond();
+    sumMatrix<<<gridDim_0, blockDim_0>>>(A_dev, B_dev, C_dev, row, col);    // 调用 CUDA 核函数
+    CHECK(cudaDeviceSynchronize());
+    iElaps = cpuSecond() - iStart;
+    printf("GPU Execution configuration<<<(%d, %d),(%d, %d)>>> Time elapsed %f sec\n",
+           gridDim_0.x, gridDim_0.y, blockDim_0.x, blockDim_0.y, iElaps);
+    CHECK(cudaMemcpy(C_from_gpu, C_dev, nBytes, cudaMemcpyDeviceToHost));
+    checkResult(C_host, C_from_gpu, sum);
+
+    cudaFree(A_dev);
+    cudaFree(B_dev);
+    cudaFree(C_dev);
+
+    free(A_host);
+    free(B_host);
+    free(C_host);
+    free(C_from_gpu);
+    
+    cudaDeviceReset();
+    return 0;
+}
+```
+
+这里用两个 $8192×8192$ 的矩阵相加来测试效率。注意一下这里的GPU内存，一个矩阵是 $2^{14}×2^{14}×2^2=2^{30}$ 字节 也就是 1G，三个矩阵就是 3G。 
+
+#### 3.1. 用 nvprof 检测活跃的线程束 Checking Active Warps with nvprof
 
 对比性能要控制变量，上面的代码只用两个变量，也就是块的x和y的大小，所以，调整x和y的大小来产生不同的效率，结果如下：
 
 ```shell
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 32 32
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 32 32
 CPU Execution Time elapsed 0.538640 sec
 GPU Execution configuration<<<(512, 512),(32, 32)>>> Time elapsed 0.090911 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 32 16
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 32 16
 CPU Execution Time elapsed 0.548685 sec
 GPU Execution configuration<<<(512, 1024),(32, 16)>>> Time elapsed 0.086876 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 16 32
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 16 32
 CPU Execution Time elapsed 0.544791 sec
 GPU Execution configuration<<<(1024, 512),(16, 32)>>> Time elapsed 0.056706 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 16 16
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 16 16
 CPU Execution Time elapsed 0.548078 sec
 GPU Execution configuration<<<(1024, 1024),(16, 16)>>> Time elapsed 0.056472 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 16 8
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 16 8
 CPU Execution Time elapsed 0.546093 sec
 GPU Execution configuration<<<(1024, 2048),(16, 8)>>> Time elapsed 0.086659 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 8 16
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 8 16
 CPU Execution Time elapsed 0.545576 sec
 GPU Execution configuration<<<(2048, 1024),(8, 16)>>> Time elapsed 0.056402 sec
 ```
 
 汇总成表格:
 
-| gridDim  | blockDim | CPU Time (s) | GPU Time (s)   |
-|----------|----------|--------------|----------------|
-| 512, 512 | 32, 32   | 0.538640     | 0.090911       |
-| 512, 1024| 32, 16   | 0.548685     | 0.086876       |
-| 1024, 512| 16, 32   | 0.544791     | 0.056706       |
-| 1024, 1024| 16, 16  | 0.548078     | 0.056472       |
-| 1024, 2048| 16, 8   | 0.546093     | 0.086659       |
-| 2048, 1024| 8, 16   | 0.545576     | 0.056402       |
+|  gridDim   | blockDim | CPU Time (s) | GPU Time (s) |
+|:----------:|:--------:|:------------:|:------------:|
+|  512, 512  |  32, 32  |   0.538640   |   0.090911   |
+| 512, 1024  |  32, 16  |   0.548685   |   0.086876   |
+| 1024, 512  |  16, 32  |   0.544791   |   0.056706   |
+| 1024, 1024 |  16, 16  |   0.548078   |   0.056472   |
+| 1024, 2048 |  16, 8   |   0.546093   |   0.086659   |
+| 2048, 1024 |  8, 16   |   0.545576   |   0.056402   |
 
-当块大小超过硬件的极限，并没有报错，而是返回了错误值，这个值得注意。另外，每个机器执行此代码效果可能定不一样，所以大家要根据自己的硬件分析数据。书上给出的 M2070 就和我们的结果不同，2070的 (32,16) 效率最高，而我们的 (16, 16) 效率最高，毕竟架构不同，而且CUDA版本不同导致了优化后的机器码差异很大，所以我们还是来看看活跃线程束的情况，使用
+当块大小超过硬件的极限，并没有报错，而是返回了错误值，这个值得注意。
+
+另外，每个机器执行此代码效果可能定不一样，所以大家要根据自己的硬件分析数据。书上给出的 M2070 就和我们的结果不同，2070 的 (32,16) 效率最高，而我们的 (16, 16) 效率最高，毕竟架构不同，而且CUDA版本不同导致了优化后的机器码差异很大，所以我们还是来看看活跃线程束的情况，使用
 
 ```shell
 nvprof --metrics achieved_occupancy ./sum_matrix2D 
@@ -840,7 +948,7 @@ nvprof --metrics achieved_occupancy ./sum_matrix2D
 得出结果
 
 ```shell
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 32 32 
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 32 32 
 ==43939== NVPROF is profiling process 43939, command: ./sum_matrix2D 32 32
 CPU Execution Time elapsed 0.550530 sec
 GPU Execution configuration<<<(512, 512),(32, 32)>>> Time elapsed 0.096127 sec
@@ -851,7 +959,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.728469    0.728469    0.728469
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 32 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 32 16
 ==44053== NVPROF is profiling process 44053, command: ./sum_matrix2D 32 16
 CPU Execution Time elapsed 0.551584 sec
 GPU Execution configuration<<<(512, 1024),(32, 16)>>> Time elapsed 0.089149 sec
@@ -862,7 +971,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.904511    0.904511    0.904511
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 16 32
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 16 32
 ==44187== NVPROF is profiling process 44187, command: ./sum_matrix2D 16 32
 CPU Execution Time elapsed 0.547609 sec
 GPU Execution configuration<<<(1024, 512),(16, 32)>>> Time elapsed 0.070035 sec
@@ -873,7 +983,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.817224    0.817224    0.817224
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 16 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 16 16
 ==44285== NVPROF is profiling process 44285, command: ./sum_matrix2D 16 16
 CPU Execution Time elapsed 0.550066 sec
 GPU Execution configuration<<<(1024, 1024),(16, 16)>>> Time elapsed 0.062846 sec
@@ -884,7 +995,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.885973    0.885973    0.885973
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 16 8
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 16 8
 ==44394== NVPROF is profiling process 44394, command: ./sum_matrix2D 16 8
 CPU Execution Time elapsed 0.548652 sec
 GPU Execution configuration<<<(1024, 2048),(16, 8)>>> Time elapsed 0.092749 sec
@@ -895,7 +1007,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.968459    0.968459    0.968459
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 8 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 8 16
 ==44547== NVPROF is profiling process 44547, command: ./sum_matrix2D 8 16
 CPU Execution Time elapsed 0.549166 sec
 GPU Execution configuration<<<(2048, 1024),(8, 16)>>> Time elapsed 0.062462 sec
@@ -908,18 +1021,20 @@ Device "NVIDIA GeForce GTX 1060 6GB (0)"
           1                        achieved_occupancy                        Achieved Occupancy    0.870483    0.870483    0.870483
 ```
 
-| gridDim  | blockDim | CPU Time (s) | GPU Time (s) | Achieved Occupancy |
-|----------|----------|--------------|--------------|---------------------|
-| 512, 512 | 32, 32   | 0.550530     | 0.096127     | 0.728469            |
-| 512, 1024| 32, 16   | 0.551584     | 0.089149     | 0.904511            |
-| 1024, 512| 16, 32   | 0.547609     | 0.070035     | 0.817224            |
-| 1024, 1024| 16, 16  | 0.550066     | 0.062846     | 0.885973            |
-| 1024, 2048| 16, 8   | 0.548652     | 0.092749     | 0.968459            |
-| 2048, 1024| 8, 16   | 0.549166     | 0.062462     | 0.870483            |
+|  gridDim   | blockDim | CPU Time (s) | GPU Time (s) | Achieved Occupancy |
+|:----------:|:--------:|:------------:|:------------:|:------------------:|
+|  512, 512  |  32, 32  |   0.550530   |   0.096127   |      0.728469      |
+| 512, 1024  |  32, 16  |   0.551584   |   0.089149   |      0.904511      |
+| 1024, 512  |  16, 32  |   0.547609   |   0.070035   |      0.817224      |
+| 1024, 1024 |  16, 16  |   0.550066   |   0.062846   |      0.885973      |
+| 1024, 2048 |  16, 8   |   0.548652   |   0.092749   |      0.968459      |
+| 2048, 1024 |  8, 16   |   0.549166   |   0.062462   |      0.870483      |
 
-可见活跃线程束比例高的未必执行速度快，但实际上从原理出发，应该是利用率越高效率越高，但是还受到其他因素制约。活跃线程束比例的定义是：每个周期活跃的线程束的平均值与一个sm支持的线程束最大值的比。
+可见活跃线程束比例高的未必执行速度快，但实际上从原理出发，应该是利用率越高效率越高，但是还受到其他因素制约。
 
-#### 用 nvprof 检测内存操作 Checking Active Warps with nvprof
+活跃线程束比例的定义是：每个周期活跃的线程束的平均值与一个SM支持的线程束最大值的比。
+
+#### 3.2. 用 nvprof 检测内存操作 Checking Active Warps with nvprof
 
 下面我们继续用nvprof来看看内存利用率如何
 
@@ -928,7 +1043,7 @@ nvprof --metrics gld_throughput ./sum_matrix2D
 ```
 
 ```shell
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_throughput ./sum_matrix2D 32 32 
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_throughput ./sum_matrix2D 32 32 
 ==44801== NVPROF is profiling process 44801, command: ./sum_matrix2D 32 32
 CPU Execution Time elapsed 0.544097 sec
 GPU Execution configuration<<<(512, 512),(32, 32)>>> Time elapsed 0.273369 sec
@@ -939,7 +1054,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_throughput                    Global Load Throughput  61.836GB/s  61.836GB/s  61.836GB/s
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_throughput ./sum_matrix2D 32 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_throughput ./sum_matrix2D 32 16
 ==44878== NVPROF is profiling process 44878, command: ./sum_matrix2D 32 16
 CPU Execution Time elapsed 0.545615 sec
 GPU Execution configuration<<<(512, 1024),(32, 16)>>> Time elapsed 0.247466 sec
@@ -950,7 +1066,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_throughput                    Global Load Throughput  68.650GB/s  68.650GB/s  68.650GB/s
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_throughput ./sum_matrix2D 16 32
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_throughput ./sum_matrix2D 16 32
 ==44973== NVPROF is profiling process 44973, command: ./sum_matrix2D 16 32
 CPU Execution Time elapsed 0.553040 sec
 GPU Execution configuration<<<(1024, 512),(16, 32)>>> Time elapsed 0.244212 sec
@@ -961,7 +1078,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_throughput                    Global Load Throughput  34.835GB/s  34.835GB/s  34.835GB/s
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_throughput ./sum_matrix2D 16 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_throughput ./sum_matrix2D 16 16
 ==45123== NVPROF is profiling process 45123, command: ./sum_matrix2D 16 16
 CPU Execution Time elapsed 0.545451 sec
 GPU Execution configuration<<<(1024, 1024),(16, 16)>>> Time elapsed 0.240271 sec
@@ -972,7 +1090,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_throughput                    Global Load Throughput  35.409GB/s  35.409GB/s  35.409GB/s
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_throughput ./sum_matrix2D 16 8
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_throughput ./sum_matrix2D 16 8
 ==45182== NVPROF is profiling process 45182, command: ./sum_matrix2D 16 8
 CPU Execution Time elapsed 0.543101 sec
 GPU Execution configuration<<<(1024, 2048),(16, 8)>>> Time elapsed 0.246472 sec
@@ -983,7 +1102,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_throughput                    Global Load Throughput  34.444GB/s  34.444GB/s  34.444GB/s
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_throughput ./sum_matrix2D 8 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_throughput ./sum_matrix2D 8 16
 ==45295== NVPROF is profiling process 45295, command: ./sum_matrix2D 8 16
 CPU Execution Time elapsed 0.545891 sec
 GPU Execution configuration<<<(2048, 1024),(8, 16)>>> Time elapsed 0.240333 sec
@@ -996,17 +1116,16 @@ Device "NVIDIA GeForce GTX 1060 6GB (0)"
           1                            gld_throughput                    Global Load Throughput  17.701GB/s  17.701GB/s  17.701GB/s
 ```
 
-| gridDim  | blockDim | CPU Time (s) | GPU Time (s) | Achieved Occupancy | GLD Throughput (GB/s) |
-|----------|----------|--------------|--------------|---------------------|-----------------------|
-| 512, 512 | 32, 32   | 0.544097     | 0.273369     | 0.728469            | 61.836                |
-| 512, 1024| 32, 16   | 0.545615     | 0.247466     | 0.904511            | 68.650                |
-| 1024, 512| 16, 32   | 0.553040     | 0.244212     | 0.817224            | 34.835                |
-| 1024, 1024| 16, 16  | 0.545451     | 0.240271     | 0.885973            | 35.409                |
-| 1024, 2048| 16, 8   | 0.543101     | 0.246472     | 0.968459            | 34.444                |
-| 2048, 1024| 8, 16   | 0.545891     | 0.240333     | 0.870483            | 17.701                |
+|  gridDim   | blockDim | CPU Time (s) | GPU Time (s) | Achieved Occupancy | GLD Throughput (GB/s) |
+|:----------:|:--------:|:------------:|:------------:|:------------------:|:---------------------:|
+|  512, 512  |  32, 32  |   0.544097   |   0.273369   |      0.728469      |        61.836         |
+| 512, 1024  |  32, 16  |   0.545615   |   0.247466   |      0.904511      |        68.650         |
+| 1024, 512  |  16, 32  |   0.553040   |   0.244212   |      0.817224      |        34.835         |
+| 1024, 1024 |  16, 16  |   0.545451   |   0.240271   |      0.885973      |        35.409         |
+| 1024, 2048 |  16, 8   |   0.543101   |   0.246472   |      0.968459      |        34.444         |
+| 2048, 1024 |  8, 16   |   0.545891   |   0.240333   |      0.870483      |        17.701         |
 
 可以看出综合第二种配置的线程束吞吐量最大。所以可见吞吐量和线程束活跃比例一起都对最终的效率有影响。
-
 
 接着看看全局加载效率，全局效率的定义是：**被请求的全局加载吞吐量占所需的全局加载吞吐量的比值（全局加载吞吐量）**，也就是说应用程序的加载操作利用了设备内存带宽的程度；注意区别吞吐量和全局加载效率的区别，这个在前面我们已经解释过吞吐量了。
 
@@ -1015,7 +1134,7 @@ nvprof --metrics gld_efficiency ./sum_matrix2D
 ```
 
 ```shell
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_efficiency ./sum_matrix2D 32 32
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_efficiency ./sum_matrix2D 32 32
 ==45602== NVPROF is profiling process 45602, command: ./sum_matrix2D 32 32
 CPU Execution Time elapsed 0.544926 sec
 ==45602== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
@@ -1028,7 +1147,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_efficiency             Global Memory Load Efficiency      12.50%      12.50%      12.50%
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_efficiency ./sum_matrix2D 32 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_efficiency ./sum_matrix2D 32 16
 ==45728== NVPROF is profiling process 45728, command: ./sum_matrix2D 32 16
 CPU Execution Time elapsed 0.546795 sec
 ==45728== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
@@ -1041,7 +1161,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_efficiency             Global Memory Load Efficiency      12.50%      12.50%      12.50%
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_efficiency ./sum_matrix2D 16 32
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_efficiency ./sum_matrix2D 16 32
 ==45829== NVPROF is profiling process 45829, command: ./sum_matrix2D 16 32
 CPU Execution Time elapsed 0.549460 sec
 ==45829== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
@@ -1054,7 +1175,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_efficiency             Global Memory Load Efficiency      25.00%      25.00%      25.00%
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_efficiency ./sum_matrix2D 16 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_efficiency ./sum_matrix2D 16 16
 ==45926== NVPROF is profiling process 45926, command: ./sum_matrix2D 16 16
 CPU Execution Time elapsed 0.548614 sec
 ==45926== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
@@ -1067,7 +1189,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_efficiency             Global Memory Load Efficiency      25.00%      25.00%      25.00%
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_efficiency ./sum_matrix2D 16 8
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_efficiency ./sum_matrix2D 16 8
 ==46017== NVPROF is profiling process 46017, command: ./sum_matrix2D 16 8
 CPU Execution Time elapsed 0.548084 sec
 ==46017== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
@@ -1080,7 +1203,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                            gld_efficiency             Global Memory Load Efficiency      25.00%      25.00%      25.00%
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics gld_efficiency ./sum_matrix2D 8 16
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics gld_efficiency ./sum_matrix2D 8 16
 ==46086== NVPROF is profiling process 46086, command: ./sum_matrix2D 8 16
 CPU Execution Time elapsed 0.545527 sec
 ==46086== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
@@ -1095,76 +1219,82 @@ Device "NVIDIA GeForce GTX 1060 6GB (0)"
           1                            gld_efficiency             Global Memory Load Efficiency      50.00%      50.00%      50.00%
 ```
 
-| gridDim     | blockDim  | CPU Time (s) | GPU Time (s) | Achieved Occupancy | GLD Throughput (GB/s) | GLD Efficiency |
-|-------------|-----------|--------------|--------------|---------------------|-----------------------|----------------|
-| (512, 512)  | (32, 32)  | 0.544097     | 0.273369     | 0.728469            | 61.836                | 12.50%         |
-| (512, 1024) | (32, 16)  | 0.545615     | 0.247466     | 0.904511            | 68.650                | 12.50%         |
-| (1024, 512) | (16, 32)  | 0.553040     | 0.244212     | 0.817224            | 34.835                | 25.00%         |
-| (1024, 1024)| (16, 16)  | 0.545451     | 0.240271     | 0.885973            | 35.409                | 25.00%         |
-| (1024, 2048)| (16, 8)   | 0.543101     | 0.246472     | 0.968459            | 34.444                | 25.00%         |
-| (2048, 1024)| (8, 16)   | 0.545891     | 0.240333     | 0.870483            | 17.701                | 50.00%         |
+|   gridDim    | blockDim | CPU Time (s) | GPU Time (s) | Achieved Occupancy | GLD Throughput (GB/s) | GLD Efficiency |
+|:------------:|:--------:|:------------:|:------------:|:------------------:|:---------------------:| -------------- |
+|  (512, 512)  | (32, 32) |   0.544097   |   0.273369   |      0.728469      |        61.836         | 12.50%         |
+| (512, 1024)  | (32, 16) |   0.545615   |   0.247466   |      0.904511      |        68.650         | 12.50%         |
+| (1024, 512)  | (16, 32) |   0.553040   |   0.244212   |      0.817224      |        34.835         | 25.00%         |
+| (1024, 1024) | (16, 16) |   0.545451   |   0.240271   |      0.885973      |        35.409         | 25.00%         |
+| (1024, 2048) | (16, 8)  |   0.543101   |   0.246472   |      0.968459      |        34.444         | 25.00%         |
+| (2048, 1024) | (8, 16)  |   0.545891   |   0.240333   |      0.870483      |        17.701         | 50.00%         |
 
+可见，如果线程块中内层的维度（blockDim.x）过小，**小于线程束会影响加载效率**。有效加载效率是指在全部的内存请求中（当前在总线上传递的数据）有多少是我们要用于计算的。
 
-可见，当线程束越小，内存效率越高。有效加载效率是指在全部的内存请求中（当前在总线上传递的数据）有多少是我们要用于计算的。
-
-#### 增大并行性 Exposing More Parallelism
+#### 3.3. 增大并行性 Exposing More Parallelism
 
 线程块中内层的维度（blockDim.x）过小 是否对现在的设备还有影响，我们来看一下下面的试验
 
 ```shell
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 64 2
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 64 2
 CPU Execution Time elapsed 0.544023 sec
 GPU Execution configuration<<<(256, 8192),(64, 2)>>> Time elapsed 0.356677 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 64 4
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 64 4
 CPU Execution Time elapsed 0.544404 sec
 GPU Execution configuration<<<(256, 4096),(64, 4)>>> Time elapsed 0.174845 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 64 8
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 64 8
 CPU Execution Time elapsed 0.544168 sec
 GPU Execution configuration<<<(256, 2048),(64, 8)>>> Time elapsed 0.091977 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 128 2
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 128 2
 CPU Execution Time elapsed 0.545258 sec
 GPU Execution configuration<<<(128, 8192),(128, 2)>>> Time elapsed 0.355204 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 128 4
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 128 4
 CPU Execution Time elapsed 0.547236 sec
 GPU Execution configuration<<<(128, 4096),(128, 4)>>> Time elapsed 0.176689 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 128 8
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 128 8
 CPU Execution Time elapsed 0.545464 sec
 GPU Execution configuration<<<(128, 2048),(128, 8)>>> Time elapsed 0.089984 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 256 2
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 256 2
 CPU Execution Time elapsed 0.545916 sec
 GPU Execution configuration<<<(64, 8192),(256, 2)>>> Time elapsed 0.363761 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 256 4
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 256 4
 CPU Execution Time elapsed 0.548850 sec
 GPU Execution configuration<<<(64, 4096),(256, 4)>>> Time elapsed 0.190659 sec
-(DeepLearning) linxi@linxi1989:~/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D$ ./sum_matrix2D 256 8
+
+(DeepLearning) linxi@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03$ ./sum_matrix2D 256 8
 CPU Execution Time elapsed 0.547406 sec
 GPU Execution configuration<<<(64, 2048),(256, 8)>>> Time elapsed 0.000030 sec
 ```
 
-| gridDim     | blockDim  | CPU Time (s) | GPU Time (s) |
-|-------------|-----------|--------------|--------------|
-| (256, 8192) | (64, 2)   | 0.544023     | 0.356677     |
-| (256, 4096) | (64, 4)   | 0.544404     | 0.174845     |
-| (256, 2048) | (64, 8)   | 0.544168     | 0.091977     |
-| (128, 8192) | (128, 2)  | 0.545258     | 0.355204     |
-| (128, 4096) | (128, 4)  | 0.547236     | 0.176689     |
-| (128, 2048) | (128, 8)  | 0.545464     | 0.089984     |
-| (64, 8192)  | (256, 2)  | 0.545916     | 0.363761     |
-| (64, 4096)  | (256, 4)  | 0.548850     | 0.190659     |
-| (64, 2048)  | (256, 8)  | 0.547406     | 0.000030     |
-
+|   gridDim   | blockDim | CPU Time (s) | GPU Time (s) |
+|:-----------:|:--------:|:------------:|:------------:|
+| (256, 8192) | (64, 2)  |   0.544023   |   0.356677   |
+| (256, 4096) | (64, 4)  |   0.544404   |   0.174845   |
+| (256, 2048) | (64, 8)  |   0.544168   |   0.091977   |
+| (128, 8192) | (128, 2) |   0.545258   |   0.355204   |
+| (128, 4096) | (128, 4) |   0.547236   |   0.176689   |
+| (128, 2048) | (128, 8) |   0.545464   |   0.089984   |
+| (64, 8192)  | (256, 2) |   0.545916   |   0.363761   |
+| (64, 4096)  | (256, 4) |   0.548850   |   0.190659   |
+| (64, 2048)  | (256, 8) |   0.547406   |     fail     |
 
 通过这个表我们发现，块最小的反而获得最低的效率，即数据量大可能会影响结果，当数据量大的时候有可能决定时间的因素会发生变化，但是一些结果是可以观察到
 
 - 尽管（64，4） 和 （128，2） 有同样大小的块，但是执行效率不同，说明内层线程块尺寸影响效率
 - 最后的块参数无效，所有线程超过了 1024 GPU 最大限制线程数
-- 尽管 (64, 2) 线程块最小，但是启动了最多的线程快，速度并不是最快的
+- 尽管 (64, 2) 线程块最小，但是启动了最多的线程块，速度并不是最快的
 - 综合线程块大小和数量，(128, 8) 速度最快
 
 调整块的尺寸，还是为了增加并行性，或者说增加活跃的线程束，看看线程束的活跃比例：
 
 ```shell
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D#  nvprof --metrics achieved_occupancy ./sum_matrix2D 64 2
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03#  nvprof --metrics achieved_occupancy ./sum_matrix2D 64 2
 ==47210== NVPROF is profiling process 47210, command: ./sum_matrix2D 64 2
 CPU Execution Time elapsed 0.549154 sec
 GPU Execution configuration<<<(256, 8192),(64, 2)>>> Time elapsed 0.363687 sec
@@ -1175,7 +1305,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.941718    0.941718    0.941718
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 64 4
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 64 4
 ==47520== NVPROF is profiling process 47520, command: ./sum_matrix2D 64 4
 CPU Execution Time elapsed 0.554265 sec
 GPU Execution configuration<<<(256, 4096),(64, 4)>>> Time elapsed 0.182942 sec
@@ -1186,7 +1317,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.939658    0.939658    0.939658
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 64 8
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 64 8
 ==47609== NVPROF is profiling process 47609, command: ./sum_matrix2D 64 8
 CPU Execution Time elapsed 0.552905 sec
 GPU Execution configuration<<<(256, 2048),(64, 8)>>> Time elapsed 0.100848 sec
@@ -1197,7 +1329,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.912401    0.912401    0.912401
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 128 2
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 128 2
 ==47706== NVPROF is profiling process 47706, command: ./sum_matrix2D 128 2
 CPU Execution Time elapsed 0.554928 sec
 GPU Execution configuration<<<(128, 8192),(128, 2)>>> Time elapsed 0.361216 sec
@@ -1208,7 +1341,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.842183    0.842183    0.842183
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 128 4
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 128 4
 ==47822== NVPROF is profiling process 47822, command: ./sum_matrix2D 128 4
 CPU Execution Time elapsed 0.555749 sec
 GPU Execution configuration<<<(128, 4096),(128, 4)>>> Time elapsed 0.182397 sec
@@ -1219,7 +1353,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.833157    0.833157    0.833157
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 128 8
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 128 8
 ==47928== NVPROF is profiling process 47928, command: ./sum_matrix2D 128 8
 CPU Execution Time elapsed 0.550801 sec
 GPU Execution configuration<<<(128, 2048),(128, 8)>>> Time elapsed 0.099784 sec
@@ -1230,7 +1365,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.732285    0.732285    0.732285
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 256 2
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 256 2
 ==48042== NVPROF is profiling process 48042, command: ./sum_matrix2D 256 2
 CPU Execution Time elapsed 0.550500 sec
 GPU Execution configuration<<<(64, 8192),(256, 2)>>> Time elapsed 0.369576 sec
@@ -1241,7 +1377,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.804247    0.804247    0.804247
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 256 4
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 256 4
 ==48122== NVPROF is profiling process 48122, command: ./sum_matrix2D 256 4
 CPU Execution Time elapsed 0.538097 sec
 GPU Execution configuration<<<(64, 4096),(256, 4)>>> Time elapsed 0.197963 sec
@@ -1252,7 +1389,8 @@ Invocations                               Metric Name                        Met
 Device "NVIDIA GeForce GTX 1060 6GB (0)"
     Kernel: sumMatrix(float*, float*, float*, int, int)
           1                        achieved_occupancy                        Achieved Occupancy    0.791321    0.791321    0.791321
-root@linxi1989:/home/linxi/DevKit/Projects/2024-03-18_EdgeComputingCV/docs/Model_Deployment/CUDA/CUDA_Learning/build/5_sum_matrix2D# nvprof --metrics achieved_occupancy ./sum_matrix2D 256 8
+
+root@linxi1989:~/Devkit/Projects/CUDA/bin/chapter03# nvprof --metrics achieved_occupancy ./sum_matrix2D 256 8
 ==48214== NVPROF is profiling process 48214, command: ./sum_matrix2D 256 8
 CPU Execution Time elapsed 0.549278 sec
 GPU Execution configuration<<<(64, 2048),(256, 8)>>> Time elapsed 0.000024 sec
@@ -1261,17 +1399,17 @@ GPU Execution configuration<<<(64, 2048),(256, 8)>>> Time elapsed 0.000024 sec
 No events/metrics were profiled.
 ```
 
-| gridDim     | blockDim  | CPU Time (s) | GPU Time (s) | Achieved Occupancy |
-|-------------|-----------|--------------|--------------|---------------------|
-| (256, 8192) | (64, 2)   | 0.549154     | 0.363687     | 0.941718            |
-| (256, 4096) | (64, 4)   | 0.554265     | 0.182942     | 0.939658            |
-| (256, 2048) | (64, 8)   | 0.552905     | 0.100848     | 0.912401            |
-| (128, 8192) | (128, 2)  | 0.554928     | 0.361216     | 0.842183            |
-| (128, 4096) | (128, 4)  | 0.555749     | 0.182397     | 0.833157            |
-| (128, 2048) | (128, 8)  | 0.550801     | 0.099784     | 0.732285            |
-| (64, 8192)  | (256, 2)  | 0.550500     | 0.369576     | 0.804247            |
-| (64, 4096)  | (256, 4)  | 0.538097     | 0.197963     | 0.791321            |
-| (64, 2048)  | (256, 8)  | 0.549278     | 0.000024     | -                   |
+|   gridDim   | blockDim | CPU Time (s) | GPU Time (s) | Achieved Occupancy |
+|:-----------:|:--------:|:------------:|:------------:|:------------------:|
+| (256, 8192) | (64, 2)  |   0.549154   |   0.363687   |      0.941718      |
+| (256, 4096) | (64, 4)  |   0.554265   |   0.182942   |      0.939658      |
+| (256, 2048) | (64, 8)  |   0.552905   |   0.100848   |      0.912401      |
+| (128, 8192) | (128, 2) |   0.554928   |   0.361216   |      0.842183      |
+| (128, 4096) | (128, 4) |   0.555749   |   0.182397   |      0.833157      |
+| (128, 2048) | (128, 8) |   0.550801   |   0.099784   |      0.732285      |
+| (64, 8192)  | (256, 2) |   0.550500   |   0.369576   |      0.804247      |
+| (64, 4096)  | (256, 4) |   0.538097   |   0.197963   |      0.791321      |
+| (64, 2048)  | (256, 8) |   0.549278   |     fail     |        Nan         |
 
 可见最高的利用率没有最高的效率。没有任何一个因素可以直接左右最后的效率，一定是大家一起作用得到最终的结果，多因一效的典型例子，于是在优化的时候，我们应该首先保证测试时间的准确性，客观性，以及稳定性。
 
@@ -1281,9 +1419,11 @@ No events/metrics were profiled.
 - 从不同的角度寻求指标平衡，最大化效率
 - 网格和块的尺寸为调节性能提供了一个不错的起点
 
+总之，用CUDA就是为了高效，而研究这些指标是提高效率最快的途径（当然内核算法提升空间更大）
+
 ### 4. 避免分支分化 Avoiding Branch Divergence
 
-#### 并行规约问题 The Parallel Reduction Problem
+#### 4.1. 并行规约问题 The Parallel Reduction Problem
 
 在串行编程中，最最最常见的一个问题就是一组特别多数字通过计算变成一个数字，比如加法，也就是求这一组数据的和，或者乘法，这种计算当有如下特点的时候，可以用并行归约的方法处理他们：
 
@@ -1301,9 +1441,11 @@ No events/metrics were profiled.
 归约问题最常见的加法计算是把向量的数据分成对，然后用不同线程计算每一对元素，得到的结果作为输入继续分成对，迭代的进行，直到最后一个元素。成对的划分常见的方法有以下两种：
 
 1. **相邻配对：** 元素与他们相邻的元素配对
+
 ![Neighbored pair](/images/Professional%20CUDA%20C%20Programming/Neighbored%20pair.png)
 
 2. **交错配对：** 元素与一定距离的元素配对
+
 ![Interleaved pair](/images/Professional%20CUDA%20C%20Programming/Interleaved%20pair.png)
 
 图中将两种方式表现的很清楚了，可以用代码实现以下。首先是cpu版本实现交错配对归约计算的代码：
@@ -1330,17 +1472,17 @@ int recursiveReduce(int *data, int const size) {
 }
 ```
 
-这个加法运算可以改成任何满足结合律和交换律的计算，比如乘法，求最大值等。通过不同的配对方式，不同的数据组织来看CUDA的执行效率。
+和书上的代码有些不同，因为书上的代码没有考虑数组长度非2的整数幂次的结果。所以加了一个处理奇数数组最后一个无人配对的元素的处理。这个加法运算可以改成任何满足结合律和交换律的计算，比如乘法，求最大值等。通过不同的配对方式，不同的数据组织来看CUDA的执行效率。
 
-#### 并行规约中的分化 Divergence in Parallel Reduction
+#### 4.2. 并行规约中的分化 Divergence in Parallel Reduction
 
 **线程束分化**已经明确说明了，有判断条件的地方就会产生分支，比如 if 和 for 这类关键词。如下图所表示的那样，对相邻元素配对进行内核实现的流程描述：
 
 ![Parallel Reduction](/images/Professional%20CUDA%20C%20Programming/Parallel%20Reduction.png)
 
-**第一步：** 是把这个一个数组分块，每一块只包含部分数据，如上图那样（图中数据较少，但是我们假设一块上只有这么多。），我们假定这是线程块的全部数据
-**第二步：** 就是每个线程要做的事，橙色圆圈就是每个线程做的操作，可见线程threadIdx.x=0 的线程进行了三次计算，奇数线程一致在陪跑，没做过任何计算，但是根据3.2中介绍，这些线程虽然什么都不干，但是不可以执行别的指令，4号线程做了两步计算，2号和6号只做了一次计算。
-**第三步：** 将所有块得到的结果相加，就是最终结果
+- **第一步：** 是把这个一个数组分块，每一块只包含部分数据，如上图那样（图中数据较少，但是我们假设一块上只有这么多。），我们假定这是线程块的全部数据
+- **第二步：** 就是每个线程要做的事，橙色圆圈就是每个线程做的操作，可见线程threadIdx.x=0 的线程进行了三次计算，奇数线程一致在陪跑，没做过任何计算，但是根据3.2中介绍，这些线程虽然什么都不干，但是不可以执行别的指令，4号线程做了两步计算，2号和6号只做了一次计算。
+- **第三步：** 将所有块得到的结果相加，就是最终结果
 
 这个计算划分就是最简单的并行规约算法，完全符合上面我们提到的三步走的套路。值得注意的是，我们每次进行一轮计算（黄色框，这些操作同时并行）的时候，部分全局内存要进行一次修改，但只有部分被替换，而不被替换的，也不会在后面被使用到，如蓝色框里标注的内存，就被读了一次，后面就完全没有人管了。
 
@@ -1378,28 +1520,270 @@ __syncthreads();
 
 ![stride](/images/Professional%20CUDA%20C%20Programming/stride.png)
 
-注意主机端和设备端的分界，注意设备端的数据分块，完整代码在 6_reduceInteger.cu，结果如下：
+注意主机端和设备端的分界，注意设备端的数据分块，完整代码在 chapter03/reduceInteger.cu：
+
+```C
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include "../common/common.h"
+
+int recursiveReduce(int* data, int const size) {
+    // terminate check
+    if (size == 1)
+        return data[0];
+    // renew the stride
+    int const stride = size / 2;
+
+    if (size % 2 == 1) {
+        for (int i = 0; i < stride; i++) {
+            data[i] += data[i + stride];
+        }
+        data[0] += data[size - 1];
+    } else {
+        for (int i = 0; i < stride; i++) {
+            data[i] += data[i + stride];
+        }
+    }
+    // call
+    return recursiveReduce(data, stride);
+}
+
+__global__ void warmup(int* g_idata, int* g_odata, unsigned int n) {
+    // set thread ID
+    unsigned int tid = threadIdx.x;
+    // boundary check
+    if (tid >= n)
+        return;
+    // convert global data pointer to the
+    int* idata = g_idata + blockIdx.x * blockDim.x;
+    // in-place reduction in global memory
+    for (int stride = 1; stride < blockDim.x; stride *= 2) {
+        if ((tid % (2 * stride)) == 0) {
+            idata[tid] += idata[tid + stride];
+        }
+        // synchronize within block
+        __syncthreads();
+    }
+    // write result for this block to global mem
+    if (tid == 0)
+        g_odata[blockIdx.x] = idata[0];
+}
+
+__global__ void reduceNeighbored(int* g_idata, int* g_odata, unsigned int n) {
+    // set thread ID
+    unsigned int tid = threadIdx.x;
+    // boundary check
+    if (tid >= n)
+        return;
+    // convert global data pointer to the
+    int* idata = g_idata + blockIdx.x * blockDim.x;
+    // in-place reduction in global memory
+    for (int stride = 1; stride < blockDim.x; stride *= 2) {
+        if ((tid % (2 * stride)) == 0) {
+            idata[tid] += idata[tid + stride];
+        }
+        // synchronize within block
+        __syncthreads();
+    }
+    // write result for this block to global mem
+    if (tid == 0)
+        g_odata[blockIdx.x] = idata[0];
+}
+
+__global__ void reduceNeighboredLess(int* g_idata, int* g_odata, unsigned int n) {
+    unsigned int tid = threadIdx.x;
+    unsigned     idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // convert global data pointer to the local point of this block
+    int* idata = g_idata + blockIdx.x * blockDim.x;
+    if (idx > n)
+        return;
+    // in-place reduction in global memory
+    for (int stride = 1; stride < blockDim.x; stride *= 2) {
+        // convert tid into local array index
+        int index = 2 * stride * tid;
+        if (index < blockDim.x) {
+            idata[index] += idata[index + stride];
+        }
+        __syncthreads();
+    }
+    // write result for this block to global men
+    if (tid == 0)
+        g_odata[blockIdx.x] = idata[0];
+}
+
+__global__ void reduceInterleaved(int* g_idata, int* g_odata, unsigned int n) {
+    unsigned int tid = threadIdx.x;
+    unsigned     idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // convert global data pointer to the local point of this block
+    int* idata = g_idata + blockIdx.x * blockDim.x;
+    if (idx >= n)
+        return;
+    // in-place reduction in global memory
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            idata[tid] += idata[tid + stride];
+        }
+        __syncthreads();
+    }
+    // write result for this block to global men
+    if (tid == 0)
+        g_odata[blockIdx.x] = idata[0];
+}
+
+int main(int argc, char** argv) {
+    int dev = 0;
+    cudaSetDevice(dev);
+
+    int size = 1 << 24;
+    printf("	with array size %d  ", size);
+
+    // execution configuration
+    int blocksize = 1024;
+
+    if (argc > 1) {
+        blocksize = atoi(argv[1]);
+    }
+
+    dim3 block(blocksize, 1);
+    dim3 grid((size - 1) / block.x + 1, 1);
+    printf("grid %d block %d \n", grid.x, block.x);
+
+    // allocate host memory
+    size_t bytes      = size * sizeof(int);
+    int*   idata_host = (int*)malloc(bytes);
+    int*   odata_host = (int*)malloc(grid.x * sizeof(int));
+    int*   tmp        = (int*)malloc(bytes);
+
+    // initialize the array
+    for (int i = 0; i < size; ++i) {
+        idata_host[i] = (int)( rand() & 0xFF );
+    }
+
+    memcpy(tmp, idata_host, bytes);
+    double iStart, iElaps;
+    int    gpu_sum = 0;
+
+    // device memory
+    int* idata_dev = NULL;
+    int* odata_dev = NULL;
+    CHECK(cudaMalloc((void**)&idata_dev, bytes));
+    CHECK(cudaMalloc((void**)&odata_dev, grid.x * sizeof(int)));
+
+    // cpu reduction
+    int cpu_sum = 0;
+    iStart      = cpuSecond();
+    // cpu_sum = recursiveReduce(tmp, size);
+    for (int i = 0; i < size; i++)
+        cpu_sum += tmp[i];
+    printf("cpu sum:%d \n", cpu_sum);
+    iElaps = cpuSecond() - iStart;
+    printf("cpu reduce                 elapsed %lf ms cpu_sum: %d\n", iElaps, cpu_sum);
+
+    // kernel 1:reduceNeighbored
+    CHECK(cudaMemcpy(idata_dev, idata_host, bytes, cudaMemcpyHostToDevice));
+    CHECK(cudaDeviceSynchronize());
+    
+    iStart = cpuSecond();
+    warmup<<<grid, block>>>(idata_dev, odata_dev, size);
+    CHECK(cudaDeviceSynchronize());
+    iElaps = cpuSecond() - iStart;
+    CHECK(cudaMemcpy(odata_host, odata_dev, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
+    gpu_sum = 0;
+    
+    for (int i = 0; i < grid.x; i++)
+        gpu_sum += odata_host[i];
+    printf("gpu warmup                 elapsed %lf ms gpu_sum: %d   <<<grid %d block %d>>>\n",
+           iElaps, gpu_sum, grid.x, block.x);
+
+    // kernel 1:reduceNeighbored
+    CHECK(cudaMemcpy(idata_dev, idata_host, bytes, cudaMemcpyHostToDevice));
+    CHECK(cudaDeviceSynchronize());
+    
+    iStart = cpuSecond();
+    reduceNeighbored<<<grid, block>>>(idata_dev, odata_dev, size);
+    CHECK(cudaDeviceSynchronize());
+    iElaps = cpuSecond() - iStart;
+    CHECK(cudaMemcpy(odata_host, odata_dev, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
+    gpu_sum = 0;
+    
+    for (int i = 0; i < grid.x; i++)
+        gpu_sum += odata_host[i];
+    printf("gpu reduceNeighbored       elapsed %lf ms gpu_sum: %d   <<<grid %d block %d>>>\n",
+           iElaps, gpu_sum, grid.x, block.x);
+
+    // kernel 2:reduceNeighboredLess
+    CHECK(cudaMemcpy(idata_dev, idata_host, bytes, cudaMemcpyHostToDevice));
+    CHECK(cudaDeviceSynchronize());
+    
+    iStart = cpuSecond();
+    reduceNeighboredLess<<<grid, block>>>(idata_dev, odata_dev, size);
+    CHECK(cudaDeviceSynchronize());
+    iElaps = cpuSecond() - iStart;
+    CHECK(cudaMemcpy(odata_host, odata_dev, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
+    gpu_sum = 0;
+    
+    for (int i = 0; i < grid.x; i++)
+        gpu_sum += odata_host[i];
+    printf("gpu reduceNeighboredLess   elapsed %lf ms gpu_sum: %d   <<<grid %d block %d>>>\n",
+           iElaps, gpu_sum, grid.x, block.x);
+
+    // kernel 3:reduceInterleaved
+    CHECK(cudaMemcpy(idata_dev, idata_host, bytes, cudaMemcpyHostToDevice));
+    CHECK(cudaDeviceSynchronize());
+    
+    iStart = cpuSecond();
+    reduceInterleaved<<<grid, block>>>(idata_dev, odata_dev, size);
+    CHECK(cudaDeviceSynchronize());
+    iElaps = cpuSecond() - iStart;
+    CHECK(cudaMemcpy(odata_host, odata_dev, grid.x * sizeof(int), cudaMemcpyDeviceToHost));
+    gpu_sum = 0;
+    
+    for (int i = 0; i < grid.x; i++)
+        gpu_sum += odata_host[i];
+    printf("gpu reduceInterleaved      elapsed %lf ms gpu_sum: %d   <<<grid %d block %d>>>\n",
+           iElaps, gpu_sum, grid.x, block.x);
+    // free host memory
+
+    free(idata_host);
+    free(odata_host);
+    cudaFree(idata_dev);
+    cudaFree(odata_dev);
+
+    // reset device
+    CHECK(cudaDeviceReset());
+
+    // check the results
+    if (gpu_sum == cpu_sum) {
+        printf("Test success!\n");
+    }
+    
+    return EXIT_SUCCESS;
+}
+```
+
+结果如下：
 
 ```shell
         with array size 16777216  grid 16384 block 1024 
-cpu sum:1 
-cpu reduce                 elapsed 0.003834 ms cpu_sum: 1
-gpu warmup                 elapsed 0.064948 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighbored       elapsed 0.062404 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighboredLess   elapsed 0.031218 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceInterleaved      elapsed 0.013156 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
+cpu sum:2139353471 
+cpu reduce                 elapsed 0.006651 ms cpu_sum: 2139353471
+gpu warmup                 elapsed 0.002833 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighbored       elapsed 0.002634 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighboredLess   elapsed 0.001813 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceInterleaved      elapsed 0.001667 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
 Test success!
 ```
 
-warmup 是为了启动gpu防止首次启动计算时gpu的启动过程耽误时间，影响效率测试，warmup 的代码就是 reducneighbored 的代码，可见还是有微弱的差别的。下面两个是经过优化的代码。
+下面两个是经过优化的写法。warmup 是为了启动gpu防止首次启动计算时gpu的启动过程耽误时间，影响效率测试，warmup 的代码就是 reducneighbored 的代码，可见还是有微弱的差别的。下面两个是经过优化的代码。
 
-#### 改善并行规约的分化 Improving Divergence in Parallel Reduction
+#### 4.3. 改善并行规约的分化 Improving Divergence in Parallel Reduction
 
 上面归约显然是最原始的，未经过优化的东西是不能拿出去使用的，或者说一个真理是，不可能一下子就写出来满意的代码。
 
 ```C
 if ((tid % (2 * stride)) == 0)
 ```
+
 这个条件判断给内核造成了极大的分支，如图所示：
 
 ![Parallel Reduction](/images/Professional%20CUDA%20C%20Programming/Parallel%20Reduction2.png)
@@ -1449,12 +1833,12 @@ int index = 2 * stride *tid;
 
 ```shell
         with array size 16777216  grid 16384 block 1024 
-cpu sum:1 
-cpu reduce                 elapsed 0.003834 ms cpu_sum: 1
-gpu warmup                 elapsed 0.064948 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighbored       elapsed 0.062404 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighboredLess   elapsed 0.031218 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceInterleaved      elapsed 0.013156 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
+cpu sum:2139353471 
+cpu reduce                 elapsed 0.006651 ms cpu_sum: 2139353471
+gpu warmup                 elapsed 0.002833 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighbored       elapsed 0.002634 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighboredLess   elapsed 0.001813 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceInterleaved      elapsed 0.001667 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
 Test success!
 ```
 
@@ -1469,12 +1853,12 @@ nvprof --metrics inst_per_warp ./reduceInteger
 ```shell
         with array size 16777216  grid 16384 block 1024 
 ==57663== NVPROF is profiling process 57663, command: ./reduceInteger
-cpu sum:1 
-cpu reduce                 elapsed 0.003717 ms cpu_sum: 1
-gpu warmup                 elapsed 0.074615 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighbored       elapsed 0.069011 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighboredLess   elapsed 0.035108 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceInterleaved      elapsed 0.017052 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
+cpu sum:2139353471
+cpu reduce                 elapsed 0.003717 ms cpu_sum: 2139353471
+gpu warmup                 elapsed 0.074615 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighbored       elapsed 0.069011 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighboredLess   elapsed 0.035108 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceInterleaved      elapsed 0.017052 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
 Test success!
 ==57663== Profiling application: ./reduceInteger
 ==57663== Profiling result:
@@ -1504,12 +1888,12 @@ nvprof --metrics gld_throughput ./reduceInteger
 ```shell
         with array size 16777216  grid 16384 block 1024 
 ==57742== NVPROF is profiling process 57742, command: ./reduceInteger
-cpu sum:1 
-cpu reduce                 elapsed 0.003933 ms cpu_sum: 1
-gpu warmup                 elapsed 0.182649 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighbored       elapsed 0.162657 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighboredLess   elapsed 0.069491 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceInterleaved      elapsed 0.060214 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
+cpu sum:2139353471
+cpu reduce                 elapsed 0.003933 ms cpu_sum: 2139353471
+gpu warmup                 elapsed 0.182649 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighbored       elapsed 0.162657 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighboredLess   elapsed 0.069491 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceInterleaved      elapsed 0.060214 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
 Test success!
 ==57742== Profiling application: ./reduceInteger
 ==57742== Profiling result:
@@ -1528,7 +1912,7 @@ Device "NVIDIA GeForce GTX 1060 6GB (0)"
 
 新内核，内存效率要高很多，也接近一倍了，原因还是我们上面分析的，一个线程块，前面的几个线程束都在干活，而后面几个根本不干活，不干活的不会被执行，而干活的内存请求肯定很集中，最大效率的利用带宽，而最naive的内核，不干活的线程也在线程束内跟着跑，又不请求内存，所以内存访问被打碎，理论上是只有一半的内存效率，测试来看非常接近。
 
-#### 交错配对的规约 Reducing with Interleaved Pairs
+#### 4.4. 交错配对的规约 Reducing with Interleaved Pairs
 
 上面的套路是修改线程处理的数据，使部分线程束最大程度利用数据，接下来采用同样的思想，但是方法不同，接下来我们使用的方法是调整跨度，也就是我们每个线程还是处理对应的内存的位置，但内存对不是相邻的了，而是隔了一定距离的：
 
@@ -1561,12 +1945,12 @@ __global__ void reduceInterleaved(int * g_idata, int *g_odata, unsigned int n) {
 
 ```shell
         with array size 16777216  grid 16384 block 1024 
-cpu sum:1 
-cpu reduce                 elapsed 0.003834 ms cpu_sum: 1
-gpu warmup                 elapsed 0.064948 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighbored       elapsed 0.062404 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighboredLess   elapsed 0.031218 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceInterleaved      elapsed 0.013156 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
+cpu sum:2139353471 
+cpu reduce                 elapsed 0.006651 ms cpu_sum: 2139353471
+gpu warmup                 elapsed 0.002833 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighbored       elapsed 0.002634 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighboredLess   elapsed 0.001813 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceInterleaved      elapsed 0.001667 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
 Test success!
 ```
 
@@ -1579,12 +1963,12 @@ nvprof --metrics inst_per_warp ./reduceInteger
 ```shell
         with array size 16777216  grid 16384 block 1024 
 ==58133== NVPROF is profiling process 58133, command: ./reduceInteger
-cpu sum:1 
-cpu reduce                 elapsed 0.004141 ms cpu_sum: 1
-gpu warmup                 elapsed 0.074924 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighbored       elapsed 0.066874 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighboredLess   elapsed 0.035046 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceInterleaved      elapsed 0.016936 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
+cpu sum:2139353471 
+cpu reduce                 elapsed 0.004141 ms cpu_sum: 2139353471
+gpu warmup                 elapsed 0.074924 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighbored       elapsed 0.066874 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighboredLess   elapsed 0.035046 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceInterleaved      elapsed 0.016936 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
 Test success!
 ==58133== Profiling application: ./reduceInteger
 ==58133== Profiling result:
@@ -1608,12 +1992,12 @@ nvprof --metrics gld_throughput ./reduceInteger
 ```shell
         with array size 16777216  grid 16384 block 1024 
 ==58189== NVPROF is profiling process 58189, command: ./reduceInteger
-cpu sum:1 
-cpu reduce                 elapsed 0.003949 ms cpu_sum: 1
-gpu warmup                 elapsed 0.181888 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighbored       elapsed 0.164936 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceNeighboredLess   elapsed 0.072196 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
-gpu reduceInterleaved      elapsed 0.060335 ms gpu_sum: 1   <<<grid 16384 block 1024>>>
+cpu sum:2139353471 
+cpu reduce                 elapsed 0.003949 ms cpu_sum: 2139353471
+gpu warmup                 elapsed 0.181888 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighbored       elapsed 0.164936 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceNeighboredLess   elapsed 0.072196 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
+gpu reduceInterleaved      elapsed 0.060335 ms gpu_sum: 2139353471   <<<grid 16384 block 1024>>>
 Test success!
 ==58189== Profiling application: ./reduceInteger
 ==58189== Profiling result:
@@ -1631,6 +2015,8 @@ Device "NVIDIA GeForce GTX 1060 6GB (0)"
 ```
 
 reduceInterleaved内存效率居然是最低的，但是线程束内分化却是最小的。而书中说reduceInterleaved 的优势在内存读取，而非线程束分化，我们实际操作却得出了完全不同结论，到底是内存的无情，还是编译器的绝望，请看我们下个系列，到时候我们会直接研究机器码，来确定到底是什么影响了看似类似，却有结果悬殊的两个内核
+
+**此处需要查看机器码，确定两个内核的实际不同**。
 
 ---
 
