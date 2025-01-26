@@ -2018,6 +2018,607 @@ reduceInterleaved内存效率居然是最低的，但是线程束内分化却是
 
 **此处需要查看机器码，确定两个内核的实际不同**。
 
+### 5. 展开循环 Unrolling Loops
+
+像前面讲解执行模型和线程束的时候，明确的指出，GPU没有分支预测能力，所有每一个分支他都是执行的，所以在内核里尽量别写分支，分支包括啥，包括if当然还有for之类的循环语句。
+
+举例：
+
+```C
+for (itn i = 0; i < tid; i++) {  
+    // to do something
+}
+```
+
+如果上面这段代码出现在内核中，就会有分支，因为一个线程束第一个线程和最后一个线程 tid 相差 32（如果线程束大小是32的话） 那么每个线程执行的时候，for 终止时完成的计算量都不同，这就需要等待，这也就产生了分支。
+
+> 循环展开是一个尝试通过减少分支出现的频率和循环维护指令来优化循环的技术。
+
+上面这句属于书上的官方说法，我们来看看例子，不止并行算法可以展开，传统串行代码展开后效率也能一定程度的提高，因为省去了判断和分支预测失败所带来的迟滞。
+
+```C
+for (itn i = 0; i < tid; i++) {  
+    a[i] = b[i] + c[i];
+}
+```
+
+这个是最传统的写法，如果进行循环展开呢？
+
+```C
+for (int i = 0; i < 100; i += 4) {
+    a[i + 0] = b[i + 0] + c[i + 0];
+    a[i + 1] = b[i + 1] + c[i + 1];
+    a[i + 2] = b[i + 2] + c[i + 2];
+    a[i + 3] = b[i + 3] + c[i + 3];
+}
+```
+
+修改循环体的内容，把本来循环自己搞定的东西，我们自己列出来了，即手动展开循环，循环每次增加 4，并在每次迭代中处理 4 个元素。这样做的好处，从串行较多来看是**减少了条件判断的次数提升性能**。但是如果你把这段代码拿到机器上跑，其实看不出来啥效果，因为现代编译器把上述两个不同的写法，编译成了类似的机器语言，也就是，我们这不循环展开，编译器也会帮我们做。  
+
+不过值得注意的是：**目前CUDA的编译器还不能帮我们做这种优化，人为的展开核函数内的循环，能够非常大的提升内核性能**
+
+在CUDA中展开循环的目的还是那两个：
+
+1.  减少指令消耗
+2.  增加更多的独立调度指令  
+
+如果这种指令：
+
+```C
+a[i + 0] = b[i + 0] + c[i + 0];
+a[i + 1] = b[i + 1] + c[i + 1];
+a[i + 2] = b[i + 2] + c[i + 2];
+a[i + 3] = b[i + 3] + c[i + 3];
+```
+
+被添加到CUDA流水线上，是非常受欢迎的，因为其能最大限度的提高指令和内存带宽。
+
+#### 5.1. 展开的归约 Reducing with Unrolling
+
+在 [4. 避免分支分化 Avoiding Branch Divergence](#4.%20避免分支分化%20Avoiding%20Branch%20Divergence) 中，内核函数 reduceInterleaved 核函数中每个线程块只处理对应那部分的数据，我们现在的一个想法是能不能用一个线程块处理多块数据，其实这是可以实现的，如果在对这块数据进行求和前（因为总是一个线程对应一个数据）使用每个线程进行一次加法，从别的块取数据，相当于先做一个向量加法，然后再归约，这样将会用一句指令，完成之前一般的计算量，这个性价比看起来太诱人了。
+
+```C
+__global__ void reduceUnroll2(int* g_idata, int* g_odata, unsigned int n) {
+    // set thread ID
+    unsigned int tid = threadIdx.x;
+    unsigned int idx = blockDim.x * blockIdx.x * 2 + threadIdx.x;
+    // boundary check
+    if (tid >= n)
+        return;
+    // convert global data pointer to the
+    int* idata = g_idata + blockIdx.x * blockDim.x * 2;
+    if (idx + blockDim.x < n) {
+        g_idata[idx] += g_idata[idx + blockDim.x];
+    }
+    __syncthreads();
+    // in-place reduction in global memory
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            idata[tid] += idata[tid + stride];
+        }
+        // synchronize within block
+        __syncthreads();
+    }
+    // write result for this block to global mem
+    if (tid == 0)
+        g_odata[blockIdx.x] = idata[0];
+}
+```
+
+这里面的第二句，第四句，在确定线程块对应的数据的位置的时候有个乘2的偏移量
+
+![](/images/Professional%20CUDA%20C%20Programming/Pasted%20image%2020250126220921.png)
+
+这就是第二句，第四句指令的意思，我们只处理红色的线程块，而旁边白色线程块我们用
+
+```C
+if (idx + blockDim.x < n) {
+    g_idata[idx] += g_idata[idx + blockDim.x];
+}
+```
+
+处理掉了，注意我们这里用的是一维线程，也就是说，我们用原来的一半的块的数量，而每一句只添加一小句指令的情况下，完成了原来全部的计算量，这个效果应该是客观的，所以我们来看一下效果之前先看一下调用核函数的部分：
+
+```C
+    CHECK(cudaMemcpy(idata_dev, idata_host, bytes, cudaMemcpyHostToDevice));
+    CHECK(cudaDeviceSynchronize());
+    iStart = cpuSecond();
+    reduceUnroll2<<<grid.x / 2, block>>>(idata_dev, odata_dev, size);
+    cudaDeviceSynchronize();
+    iElaps = cpuSecond() - iStart;
+    cudaMemcpy(odata_host, odata_dev, grid.x * sizeof(int), cudaMemcpyDeviceToHost);
+    gpu_sum = 0;
+    for (int i = 0; i < grid.x / 2; i++)
+        gpu_sum += odata_host[i];
+    printf("reduceUnrolling2            elapsed %lf ms gpu_sum: %d<<<grid %d block %d>>>\n",
+           iElaps, gpu_sum, grid.x / 2, block.x);
+```
+
+这里需要注意由于合并了一半的线程块，这里的网格个数都要对应的减少一半，来看效率：
+
+```C
+        with array size 16777216  grid 16384 block 1024 
+cpu sum:2139353471 
+cpu reduce                  elapsed 0.019267 ms cpu_sum: 2139353471
+gpu warmup                  elapsed 0.002203 ms 
+reduceUnrolling2            elapsed 0.001801 ms gpu_sum: 2139353471<<<grid 8192 block 1024>>>
+reduceUnrolling4            elapsed 0.001630 ms gpu_sum: 2139353471<<<grid 4096 block 1024>>>
+reduceUnrolling8            elapsed 0.002190 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceUnrollingWarp8        elapsed 0.001327 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnrollWarp8   elapsed 0.000481 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnroll        elapsed 0.000400 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+Test success!
+```
+
+相比于上一节的效率，“高到不知道哪里去了”（总能引用名人名言），比最简单的归约算法快了三倍，warmup的代码，不需要理睬。  
+
+我们上面框里有2，4，8三种尺度的展开，分别是一个块计算2个块，4个块和8个块的数据，对应的调用代码也需要修改（chapter03/reduceUnrolling.cu）
+
+可见直接展开对效率影响非常大，不光是节省了多于的线程块的运行，而且更多的独立内存加载/存储操作会产生更好的性能，更好的隐藏延迟。下面我们看一下他们的吞吐量：
+
+```C
+nvprof --metrics dram_read_throughput ./reduceUnrolling
+```
+
+```shell
+
+```
+
+可见执行效率是和内存吞吐量是呈正相关的
+
+#### 5.2. 展开线程的归约 Reducing with Unrolled Warps
+
+接着我们的目标是最后那32个线程，因为归约运算是个倒金字塔，最后的结果是一个数，所以每个线程最后64个计算得到一个数字结果的过程，没执行一步，线程的利用率就降低一倍，因为从64到32，然后16。。这样到1的，我们现在想个办法，展开最后的6步迭代（64，32，16，8，4，2，1）使用下面的核函数来展开最后6步分支计算：
+
+```C
+__global__ void reduceUnrollWarp8(int* g_idata, int* g_odata, unsigned int n) {
+    // set thread ID
+    unsigned int tid = threadIdx.x;
+    unsigned int idx = blockDim.x * blockIdx.x * 8 + threadIdx.x;
+    // boundary check
+    if (tid >= n)
+        return;
+    // convert global data pointer to the
+    int* idata = g_idata + blockIdx.x * blockDim.x * 8;
+    // unrolling 8;
+    if (idx + 7 * blockDim.x < n) {
+        int a1       = g_idata[idx];
+        int a2       = g_idata[idx + blockDim.x];
+        int a3       = g_idata[idx + 2 * blockDim.x];
+        int a4       = g_idata[idx + 3 * blockDim.x];
+        int a5       = g_idata[idx + 4 * blockDim.x];
+        int a6       = g_idata[idx + 5 * blockDim.x];
+        int a7       = g_idata[idx + 6 * blockDim.x];
+        int a8       = g_idata[idx + 7 * blockDim.x];
+        g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+    }
+    __syncthreads();
+    // in-place reduction in global memory
+    for (int stride = blockDim.x / 2; stride > 32; stride >>= 1) {
+        if (tid < stride) {
+            idata[tid] += idata[tid + stride];
+        }
+        // synchronize within block
+        __syncthreads();
+    }
+    // write result for this block to global mem
+    if (tid < 32) {
+        volatile int* vmem = idata;
+        vmem[tid] += vmem[tid + 32];
+        vmem[tid] += vmem[tid + 16];
+        vmem[tid] += vmem[tid + 8];
+        vmem[tid] += vmem[tid + 4];
+        vmem[tid] += vmem[tid + 2];
+        vmem[tid] += vmem[tid + 1];
+    }
+
+    if (tid == 0)
+        g_odata[blockIdx.x] = idata[0];
+}
+```
+
+在 unrolling8 的基础上，我们对于tid在 $[0,32]$ 之间的线程用这个代码展开
+
+```C
+volatile int* vmem = idata;
+vmem[tid] += vmem[tid + 32];
+vmem[tid] += vmem[tid + 16];
+vmem[tid] += vmem[tid + 8];
+vmem[tid] += vmem[tid + 4];
+vmem[tid] += vmem[tid + 2];
+vmem[tid] += vmem[tid + 1];
+```
+
+第一步定义 volatile int 类型变量我们先不说，我们先把最后这个展开捋顺一下，当只剩下最后下面三角部分，从64个数合并到一个数，首先将前32个数，按照步长为32，进行并行加法，前32个tid得到64个数字的两两和，存在前32个数字中。接着，到了我们的关键技巧了，这32个数加上步长为16的变量，理论上，这样能得到16个数，这16个数的和就是最后这个块的归约结果，但是根据上面 tid<32 的判断条件线程 tid 16到31的线程还在运行，但是结果已经没意义了，这一步很重要（这一步可能产生疑惑的另一个原因是既然是同步执行，会不会比如线程17加上了线程33后写入17号的内存了，这时候1号才来加17号的结果，这样结果就不对了，因为我们的CUDA内核从内存中读数据到寄存器，然后进行加法都是同步进行的，也就是17号线程和1号线程同时读33号和17号的内存，这样17号即便在下一步修改，也不影响1号线程寄存器里面的值了），虽然32以内的tid的线程都在跑，但是没进行一步，后面一半的线程结果将没有用途了，  
+
+这样继续计算，得到最后的一个有效的结果就是 $tid[0]$。  
+
+上面这个过程有点复杂，但是我们自己好好想一想，从硬件取数据，到计算，每一步都分析一下，就能得到实际的结果。
+
+volatile int类型变量是控制变量结果写回到内存，而不是存在共享内存，或者缓存中，因为下一步的计算马上要用到它，如果写入缓存，可能造成下一步的读取会读到错误的数据
+
+你可能不明白
+
+```C
+vmem[tid] += vmem[tid + 32];
+vmem[tid] += vmem[tid + 16];
+```
+
+tid+16 要用到 tid+32 的结果，会不会有其他的线程造成内存竞争，答案是不会的，因为一个线程束，执行的进度是完全相同的，当执行 tid+32的时候，这32个线程都在执行这步，而不会有任何本线程束内的线程会进行到下一句，详情请回忆CUDA执行模型（因为CUDA编译器是激进的，所以我们必须添加volatile，防止编译器优化数据传输而打乱执行顺序）。  
+
+然后我们就得到结果了，看看时间：
+
+```shell
+        with array size 16777216  grid 16384 block 1024 
+cpu sum:2139353471 
+cpu reduce                  elapsed 0.019267 ms cpu_sum: 2139353471
+gpu warmup                  elapsed 0.002203 ms 
+reduceUnrolling2            elapsed 0.001801 ms gpu_sum: 2139353471<<<grid 8192 block 1024>>>
+reduceUnrolling4            elapsed 0.001630 ms gpu_sum: 2139353471<<<grid 4096 block 1024>>>
+reduceUnrolling8            elapsed 0.002190 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceUnrollingWarp8        elapsed 0.001327 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnrollWarp8   elapsed 0.000481 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnroll        elapsed 0.000400 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+Test success!
+```
+
+又往后退了一位，看起来还是很爽的。  
+这个展开还有一个节省时间的部分就是减少了5个线程束同步指令 `__syncthreads()`; 这个指令被我们减少了5次，这个也是非常有效果的。我们来看看阻塞减少了多少  
+
+使用命令
+
+```shell
+nvprof --metrics stall_sync ./reduceUnrolling
+```
+
+```shell
+
+```
+
+哈哈哈，又搞笑了，书上的结果和运行结果又不一样，展开后的stall_sync 指标反而高了，也就是说之前有同步指令的效率更高，哈哈，无解。。可以把锅甩给CUDA编译器
+
+#### 5.3. 完全展开的归约 Reducing with Complete Unrolling
+
+根据上面展开最后64个数据，我们可以直接就展开最后128个，256个，512个，1024个：  
+
+```C
+__global__ void reduceCompleteUnrollWarp8(int* g_idata, int* g_odata, unsigned int n) {
+    // set thread ID
+    unsigned int tid = threadIdx.x;
+    unsigned int idx = blockDim.x * blockIdx.x * 8 + threadIdx.x;
+    // boundary check
+    if (tid >= n)
+        return;
+    // convert global data pointer to the
+    int* idata = g_idata + blockIdx.x * blockDim.x * 8;
+    if (idx + 7 * blockDim.x < n) {
+        int a1       = g_idata[idx];
+        int a2       = g_idata[idx + blockDim.x];
+        int a3       = g_idata[idx + 2 * blockDim.x];
+        int a4       = g_idata[idx + 3 * blockDim.x];
+        int a5       = g_idata[idx + 4 * blockDim.x];
+        int a6       = g_idata[idx + 5 * blockDim.x];
+        int a7       = g_idata[idx + 6 * blockDim.x];
+        int a8       = g_idata[idx + 7 * blockDim.x];
+        g_idata[idx] = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8;
+    }
+    __syncthreads();
+    // in-place reduction in global memory
+    if (blockDim.x >= 1024 && tid < 512)
+        idata[tid] += idata[tid + 512];
+    __syncthreads();
+    if (blockDim.x >= 512 && tid < 256)
+        idata[tid] += idata[tid + 256];
+    __syncthreads();
+    if (blockDim.x >= 256 && tid < 128)
+        idata[tid] += idata[tid + 128];
+    __syncthreads();
+    if (blockDim.x >= 128 && tid < 64)
+        idata[tid] += idata[tid + 64];
+    __syncthreads();
+    // write result for this block to global mem
+    if (tid < 32) {
+        volatile int* vmem = idata;
+        vmem[tid] += vmem[tid + 32];
+        vmem[tid] += vmem[tid + 16];
+        vmem[tid] += vmem[tid + 8];
+        vmem[tid] += vmem[tid + 4];
+        vmem[tid] += vmem[tid + 2];
+        vmem[tid] += vmem[tid + 1];
+    }
+
+    if (tid == 0)
+        g_odata[blockIdx.x] = idata[0];
+}
+```
+
+内核代码如上，这里用到了tid的大小，和最后32个没用到tid不同的是，这些如果计算完整会有一半是浪费的，而最后32个已经是线程束最小的大小了，所以无论后面的数据有没有意义，那些进程都不会停。  
+
+每一步进行显示的同步，然后我们看结果，哈哈，又又又搞笑了：
+
+```shell
+        with array size 16777216  grid 16384 block 1024 
+cpu sum:2139353471 
+cpu reduce                  elapsed 0.019267 ms cpu_sum: 2139353471
+gpu warmup                  elapsed 0.002203 ms 
+reduceUnrolling2            elapsed 0.001801 ms gpu_sum: 2139353471<<<grid 8192 block 1024>>>
+reduceUnrolling4            elapsed 0.001630 ms gpu_sum: 2139353471<<<grid 4096 block 1024>>>
+reduceUnrolling8            elapsed 0.002190 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceUnrollingWarp8        elapsed 0.001327 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnrollWarp8   elapsed 0.000481 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnroll        elapsed 0.000400 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+Test success!
+```
+
+似乎速度根本没什么影响，所以我觉得是编译器的锅没错了！它已经帮我们优化这一步了。
+
+#### 5.4. 模板函数的归约 Reducing with Template Functions
+
+我们看上面这个完全展开的函数：
+
+```C
+    if (blockDim.x >= 1024 && tid < 512)
+        idata[tid] += idata[tid + 512];
+    __syncthreads();
+    if (blockDim.x >= 512 && tid < 256)
+        idata[tid] += idata[tid + 256];
+    __syncthreads();
+    if (blockDim.x >= 256 && tid < 128)
+        idata[tid] += idata[tid + 128];
+    __syncthreads();
+    if (blockDim.x >= 128 && tid < 64)
+        idata[tid] += idata[tid + 64];
+    __syncthreads();
+```
+
+这一步比较应该是多余的，因为 blockDim.x 自内核启动时一旦确定，就不能更改了，所以模板函数帮我解决了这个问题，当编译时编译器会去检查，blockDim.x 是否固定，如果固定，直接可以删除掉内核中不可能的部分也就是上半部分，下半部分是要执行的，比如blockDim.x=512，代码最后生成机器码的就是如下部分：
+
+```C
+    if (blockDim.x >= 512 && tid < 256)
+        idata[tid] += idata[tid + 256];
+    __syncthreads();
+    if (blockDim.x >= 256 && tid < 128)
+        idata[tid] += idata[tid + 128];
+    __syncthreads();
+    if (blockDim.x >= 128 && tid < 64)
+        idata[tid] += idata[tid + 64];
+    __syncthreads();
+```
+
+删掉了不可能的部分。  
+
+我们来看下模板函数的效率：
+
+```shell
+        with array size 16777216  grid 16384 block 1024 
+cpu sum:2139353471 
+cpu reduce                  elapsed 0.019267 ms cpu_sum: 2139353471
+gpu warmup                  elapsed 0.002203 ms 
+reduceUnrolling2            elapsed 0.001801 ms gpu_sum: 2139353471<<<grid 8192 block 1024>>>
+reduceUnrolling4            elapsed 0.001630 ms gpu_sum: 2139353471<<<grid 4096 block 1024>>>
+reduceUnrolling8            elapsed 0.002190 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceUnrollingWarp8        elapsed 0.001327 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnrollWarp8   elapsed 0.000481 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+reduceCompleteUnroll        elapsed 0.000400 ms gpu_sum: 2139353471<<<grid 2048 block 1024>>>
+Test success!
+```
+
+结果是，居然还慢了一些。。书上不是这么说的。。编译器的锅！
+
+加载效率存储效率：
+
+```C
+nvprof --metrics gld_efficiency,gst_efficiency ./reduceUnrolling
+```
+
+下表概括了本节提到的所有并行归约实现的结果：
+
+| 算法                      | 时间     | 加载效率 | 存储效率 |
+| ------------------------- | -------- | -------- | -------- |
+| 相邻无分化（上一篇）      | |   | 25.00%   |
+| 相邻分化（上一篇）        |  | 25.01%   | 25.00%   |
+| 交错（上一篇）            | 0.004956 | 98.04%   | 97.71%   |
+| 展开8                     | 0.001294 | 99.60%   | 99.71%   |
+| 展开8+最后的展开          | 0.001009 | 99.71%   | 99.68%   |
+| 展开8+完全展开+最后的展开 | 0.001001 | 99.71%   | 99.68%   |
+| 模板上一个算法            | 0.001008 | 99.71%   | 99.68%   |
+
+虽然和书上结果不太一样，但是指标和效率关系还是很明显的，所以我们今天得出的结论是。。一步一步优化，如果改了代码没效果，那么锅是编译器的！
+
+### 6. 动态并行
+
+本文作为第三章CUDA执行模型的最后一篇介绍动态并行，书中关于动态并行有一部分嵌套归约的例子，但是我认为，这个例子应该对我们用途不大，首先它并不能降低代码复杂度，其次，其运行效率也没有提高，动态并行，相当于串行编程的中的递归调用，递归调用如果能转换成迭代循环，一般为了效率的时候是要转换成循环的，只有当效率不是那么重要，而更注重代码的简洁性的时候，我们才会使用，所以我们本文只介绍简单的一些基础知识，如果需要使用动态并行相关内容的同学，请查询文档或更专业的博客。  
+
+到目前为止，我们所有的内核都是在主机线程中调用的，那么我们肯定会想，是否我们可以在内核中调用内核，这个内核可以是别的内核，也可以是自己，那么我们就需要动态并行了，这个功能在早期的设备上是不支持的。  
+
+动态并行的好处之一就是能让复杂的内核变得有层次，坏处就是写出来的程序更复杂，因为并行行为本来就不好控制。动态并行的另一个好处是等到执行的时候再配置创建多少个网格，多少个块，这样就可以动态的利用GPU硬件调度器和加载平衡器了，通过动态调整，来适应负载。并且在内核中启动内核可以减少一部分数据传输消耗。
+
+#### 6.1. 嵌套执行 Nested Execution
+ 
+前面我们大费周章的其实也就只学了，网格，块，和启动配置，以及一些线程束的知识，现在我们要做的是从内核中启动内核。  
+
+内核中启动内核，和cpu并行中有一个相似的概念，就是父线程和子线程。子线程由父线程启动，但是到了GPU，这类名词相对多了些，比如父网格，父线程块，父线程，对应的子网格，子线程块，子线程。子网格被父线程启动，且必须在对应的父线程，父线程块，父网格结束之前结束。所有的子网格结束后，父线程，父线程块，父网格才会结束。
+
+![](/images/Professional%20CUDA%20C%20Programming/Pasted%20image%2020250126225006.png)
+
+上图清晰地表明了父网格和子网格的使用情况，一种典型的执行方式：
+
+> 主机启动一个网格（也就是一个内核）-> 此网格（父网格）在执行的过程中启动新的网格（子网格们）->所有子网格们都运行结束后-> 父网格才能结束，否则要等待
+
+如果调用的线程没有显示同步启动子网格，那么运行时保证，父网格和子网格隐式同步。  
+图中显式的同步了父网格和子网格，通过设置栅栏的方法。  
+
+父网格中的不同线程启动的不同子网格，这些子网格拥有相同的父线程块，他们之间是可以同步的。线程块中所有的线程创建的所有子网格完成之后，线程块执行才会完成。如果块中的所有线程在子网格完成前退出，那么子网格隐式同步会被触发。隐式同步就是虽然没用同步指令，但是父线程块中虽然所有线程都执行完毕，但是依旧要等待对应的所有子网格执行完毕，然后才能退出。  
+
+前面我们讲过隐式同步，比如cudaMemcpy就能起到隐式同步的作用，但是主机内启动的网格，如果没有显式同步，也没有隐式同步指令，那么cpu线程很有可能就真的退出了，而你的gpu程序可能还在运行，这样就非常尴尬了。父线程块启动子网格需要显示的同步，也就是说不通的线程束需要都执行到子网格调用那一句，这个线程块内的所有子网格才能依据所在线程束的执行，一次执行。  
+
+接着是最头疼的内存，内存竞争对于普通并行就很麻烦了，现在对于动态并行，更麻烦，主要的有下面几点：
+
+1.  父网格和子网格共享相同的全局和常量内存。
+2.  父网格子网格有不同的局部内存
+3.  有了子网格和父网格间的弱一致性作为保证，父网格和子网格可以对全局内存并发存取。
+4.  有两个时刻父网格和子网格所见内存一致：子网格启动的时候，子网格结束的时候
+5.  共享内存和局部内存分别对于线程块和线程来说是私有的
+6.  局部内存对线程私有，对外不可见。
+
+#### 6.2. 在GPU上嵌套 Hello World    Nested Hello World on the GPU
+
+为了研究初步动态并行，我们先来写个Hello World进行操作，代码如下：
+
+```C
+#include <cuda_runtime.h>
+#include <stdio.h>
+
+__global__ void nesthelloworld(int iSize, int iDepth) {
+    unsigned int tid = threadIdx.x;
+    printf("depth : %d blockIdx: %d,threadIdx: %d\n", iDepth, blockIdx.x, threadIdx.x);
+    if (iSize == 1)
+        return;
+    int nthread = (iSize >> 1);
+    if (tid == 0 && nthread > 0) {
+        nesthelloworld<<<1, nthread>>>(nthread, ++iDepth);
+        printf("-----------> nested execution depth: %d\n", iDepth);
+    }
+}
+
+int main(int argc, char* argv[]) {
+    int  size    = 64;
+    int  block_x = 2;
+    
+    dim3 block(block_x, 1);
+    dim3 grid((size - 1) / block.x + 1, 1);
+    nesthelloworld<<<grid, block>>>(size, 0);
+    cudaGetLastError();
+    cudaDeviceReset();
+    
+    return 0;
+}
+```
+
+这个程序的功能如下：  
+
+- 第一层： 有多个线程块，执行输出，然后在 `tid==0` 的线程，启动子网格，子网格的配置是当前的一半，包括线程数量，和输入参数 iSize。  
+- 第二层： 有很多不同的子网格，因为我们上面多个不同的线程块都启动了子网格，我们这里只分析一个子网格，执行输出，然后在 `tid==0` 的子线程，启动子网格，子网格的配置是当前的一半，包括线程数量，和输入参数 iSize。  
+- 第三层： 继续递归下去，直到 `iSize==0` 结束。
+
+编译的命令与之前有些不同，工程中使用cmake管理，可在 CMakeLists.txt 中查看：
+
+```CMake
+add_executable(nestedHelloWorld nestedHelloWorld.cu)
+target_compile_options(nestedHelloWorld PRIVATE -g -G -O3 -rdc=true)
+set_target_properties(nestedHelloWorld PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+install(TARGETS nestedHelloWorld DESTINATION chapter03)
+```
+
+-rdc=true 是前面没有的，指的是生成可重新定位的代码，第十章将会讲解更多重新定位设备代码的内容。CUDA_SEPARABLE_COMPILATION ON 是动态并行需要的一个库。
+
+执行结果如下，有点长，但是能看出一些问题：
+
+```shell
+-----------> nested execution depth: 6
+depth : 4 blockIdx: 0, threadIdx: 0
+depth : 4 blockIdx: 0, threadIdx: 1
+depth : 4 blockIdx: 0, threadIdx: 2
+depth : 4 blockIdx: 0, threadIdx: 3
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+-----------> nested execution depth: 6
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+-----------> nested execution depth: 5
+-----------> nested execution depth: 4
+-----------> nested execution depth: 6
+-----------> nested execution depth: 5
+-----------> nested execution depth: 5
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 5
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+-----------> nested execution depth: 5
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 5
+-----------> nested execution depth: 5
+-----------> nested execution depth: 6
+-----------> nested execution depth: 5
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 5
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+-----------> nested execution depth: 5
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 5
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 5 blockIdx: 0, threadIdx: 0
+depth : 5 blockIdx: 0, threadIdx: 1
+-----------> nested execution depth: 5
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+-----------> nested execution depth: 6
+depth : 6 blockIdx: 0, threadIdx: 0
+```
+
+可见，当多层调用子网格的时候，同一家的（就是用相同祖宗线程的子网）是隐式同步的，而不同宗的则是各跑各的。
+
 ---
 
 ## 参考引用
