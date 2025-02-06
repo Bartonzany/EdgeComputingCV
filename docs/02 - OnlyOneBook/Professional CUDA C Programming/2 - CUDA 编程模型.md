@@ -945,6 +945,7 @@ $$745MHz×2GPUs×(8SMs×192ALUs×32cores/SM)×2OPS/cycle=4.58TFLOPS$$
 $$2GPUs×256bits×2500MHz×2DDR/8bits/byte=320GB/s$$
 
 -   **算术强度（FLOP/Byte）**：
+  
 $$\frac {4.58TFLOPS}{320GB/s}​=13.6FLOP/Byte$$
 
 ### 4. 组织并行线程 Organizing Parallel Threads
