@@ -1656,7 +1656,7 @@ Maximum number of threads per multiprocessor:  2048
 Maximum number of warps per multiprocessor:     64
 ```
 
-主要用到了下面 API。了解 API 的功能最好不要看博客，因为博客不会与时俱进，要查文档，所以对于API的不了解，
+主要用到了下面的几个 API。了解 API 的功能最好不要看博客，因为博客不会与时俱进，要查文档，所以对于API的不了解，
 
 **建议查阅官方文档，而非博客，以确保信息的准确性和时效性！**
 
