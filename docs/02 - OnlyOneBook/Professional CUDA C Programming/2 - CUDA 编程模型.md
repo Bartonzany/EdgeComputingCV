@@ -406,7 +406,7 @@ kernel_fun<<<grid_size, block_size>>>();
 dim3 grid_size(2, 3);  // or dim3 grid_size(2, 3, 1);
 dim3 block_size(6, 2, 2);
 
-kernel_ful<<<grid_size, block_size>>>();
+kernel_fun<<<grid_size, block_size>>>();
 ```
 
 解释：
