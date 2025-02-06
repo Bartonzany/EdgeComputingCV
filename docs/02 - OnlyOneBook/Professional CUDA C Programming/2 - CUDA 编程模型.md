@@ -1759,7 +1759,7 @@ nvidia-smi -q -i 0 -d UTILIZATION | tail -n 4  # 利用率
 -   **PAGE_RETIREMENT**（内存页故障情况）
 -   **ACCOUNTING**（计算任务日志）
 
-### 6. 总结
+### 6. 总结 Summary
 
 至此，CUDA 编程的核心概念已涵盖：核函数、计时、内存管理、线程组织、设备参数等。掌握这些内容，已经能够编写出比 CPU 快得多的 CUDA 程序。下一篇将深入研究 GPU 硬件架构背后的性能优化策略。
 
