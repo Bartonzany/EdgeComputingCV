@@ -1306,7 +1306,7 @@ __global__ void MatrixAdd(float * MatA, float * MatB, float * MatC, const int nu
 }
 ```
 
-下面调整不同的线程组织形式，测试一下不同的效率并保证得到正确的结果，但是什么时候得到最好的效率是后面才要考虑的。我们要做的就是用各种不同的相乘组织形式得到正确结果，代码在 `chapter02/sumMatrix2D.cu` 中。
+下面调整不同的线程组织形式，测试一下不同的效率并保证得到正确的结果，但是什么时候得到最好的效率是后面才要考虑的。我们要做的就是用各种不同的相乘组织形式得到正确结果，代码在 `chapter02/sumMatrix.cu` 中。
 
 ```C
 #include <cuda_runtime.h>
