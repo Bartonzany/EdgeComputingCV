@@ -1,0 +1,22 @@
+add_executable(simpleDivergence simpleDivergence.cu)
+add_executable(simpleDeviceQuery simpleDeviceQuery.cu)
+add_executable(sumMatrix2D sumMatrix2D.cu)
+add_executable(reduceInteger reduceInteger.cu)
+add_executable(reduceUnrolling reduceUnrolling.cu)
+add_executable(nestedHelloWorld nestedHelloWorld.cu)
+
+target_compile_options(simpleDivergence PRIVATE -g -G -O3)
+target_compile_options(simpleDeviceQuery PRIVATE -g -G -O3)
+target_compile_options(sumMatrix2D PRIVATE -g -G -O3)
+target_compile_options(reduceInteger PRIVATE -g -G -O3)
+target_compile_options(reduceUnrolling PRIVATE -g -G -O3)
+target_compile_options(nestedHelloWorld PRIVATE -g -G -O3 -rdc=true)
+
+set_target_properties(nestedHelloWorld PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
+install(TARGETS simpleDivergence DESTINATION chapter03)
+install(TARGETS simpleDeviceQuery DESTINATION chapter03)
+install(TARGETS sumMatrix2D DESTINATION chapter03)
+install(TARGETS reduceInteger DESTINATION chapter03)
+install(TARGETS reduceUnrolling DESTINATION chapter03)
+install(TARGETS nestedHelloWorld DESTINATION chapter03)
