@@ -13,13 +13,13 @@ int recursiveReduce(int* data, int const size) {
         for (int i = 0; i < stride; i++) {
             data[i] += data[i + stride];
         }
-        data[0] += data[size - 1];
+        data[0] += data[size - 1]; // add the last element to the first element
     } else {
         for (int i = 0; i < stride; i++) {
             data[i] += data[i + stride];
         }
     }
-    // call
+    // recursive call
     return recursiveReduce(data, stride);
 }
 
@@ -29,9 +29,9 @@ __global__ void warmup(int* g_idata, int* g_odata, unsigned int n) {
     // boundary check
     if (tid >= n)
         return;
-    // convert global data pointer to the
+    // convert global data pointer to the in-place reduction in global memory
     int* idata = g_idata + blockIdx.x * blockDim.x;
-    // in-place reduction in global memory
+     
     for (int stride = 1; stride < blockDim.x; stride *= 2) {
         if ((tid % (2 * stride)) == 0) {
             idata[tid] += idata[tid + stride];
@@ -39,7 +39,7 @@ __global__ void warmup(int* g_idata, int* g_odata, unsigned int n) {
         // synchronize within block
         __syncthreads();
     }
-    // write result for this block to global mem
+    // write result for this block to global memory
     if (tid == 0)
         g_odata[blockIdx.x] = idata[0];
 }
@@ -50,9 +50,9 @@ __global__ void reduceNeighbored(int* g_idata, int* g_odata, unsigned int n) {
     // boundary check
     if (tid >= n)
         return;
-    // convert global data pointer to the
+    // convert global data pointer to the in-place reduction in global memory
     int* idata = g_idata + blockIdx.x * blockDim.x;
-    // in-place reduction in global memory
+     
     for (int stride = 1; stride < blockDim.x; stride *= 2) {
         if ((tid % (2 * stride)) == 0) {
             idata[tid] += idata[tid + stride];
@@ -60,7 +60,7 @@ __global__ void reduceNeighbored(int* g_idata, int* g_odata, unsigned int n) {
         // synchronize within block
         __syncthreads();
     }
-    // write result for this block to global mem
+    // write result for this block to global memory
     if (tid == 0)
         g_odata[blockIdx.x] = idata[0];
 }
