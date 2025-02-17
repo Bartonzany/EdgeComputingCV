@@ -1,0 +1,6 @@
+add_subdirectory(UnifiedMemoryStreams)
+add_subdirectory(asyncAPI)
+add_subdirectory(clock)
+add_subdirectory(clock_nvrtc)
+add_subdirectory(cudaOpenMP)
+add_subdirectory(fp16ScalarProduct)
