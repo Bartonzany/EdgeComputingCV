@@ -1,29 +1,37 @@
-add_executable(sumArrays sumArrays.cu)
-add_executable(checkDimension checkDimension.cu)
-add_executable(defineGridBlock defineGridBlock.cu)
-add_executable(sumArraysOnGPU-small-case sumArraysOnGPU-small-case.cu)
-add_executable(sumArraysTimer sumArraysTimer.cu)
-add_executable(checkThreadIndex checkThreadIndex.cu)
-add_executable(checkThreadIndexFloat checkThreadIndexFloat.cu)
-add_executable(sumMatrix sumMatrix.cu)
-add_executable(checkDeviceInfor checkDeviceInfor.cu)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+project(chapter02 LANGUAGES C CXX CUDA)  
 
-target_compile_options(sumArrays PRIVATE -g -G -O3)
-target_compile_options(checkDimension PRIVATE -g -G -O3)
-target_compile_options(defineGridBlock PRIVATE -g -G -O3)
-target_compile_options(sumArraysOnGPU-small-case PRIVATE -g -G -O3)
-target_compile_options(sumArraysTimer PRIVATE -g -G -O3)
-target_compile_options(checkThreadIndex PRIVATE -g -G -O3)
-target_compile_options(checkThreadIndexFloat PRIVATE -g -G -O3)
-target_compile_options(sumMatrix PRIVATE -g -G -O3)
-target_compile_options(checkDeviceInfor PRIVATE -g -G -O3)
+find_package(CUDAToolkit REQUIRED)
 
-install(TARGETS sumArrays DESTINATION chapter02)
-install(TARGETS checkDimension DESTINATION chapter02)
-install(TARGETS defineGridBlock DESTINATION chapter02)
-install(TARGETS sumArraysOnGPU-small-case DESTINATION chapter02)
-install(TARGETS sumArraysTimer DESTINATION chapter02)
-install(TARGETS checkThreadIndex DESTINATION chapter02)
-install(TARGETS checkThreadIndexFloat DESTINATION chapter02)
-install(TARGETS sumMatrix DESTINATION chapter02)
-install(TARGETS checkDeviceInfor DESTINATION chapter02)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CUDA_ARCHITECTURES 50 52 53 60 61 62 70 72 75 80 86 87 89 90 100 101 120)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Wno-deprecated-gpu-targets")
+
+# 定义所有可执行目标列表
+set(EXECUTABLE_TARGETS
+    sumArrays
+    checkDimension
+    defineGridBlock
+    sumArraysOnGPU-small-case
+    sumArraysTimer
+    checkThreadIndex
+    checkThreadIndexFloat
+    sumMatrix
+    checkDeviceInfor
+)
+
+# 为每个目标创建可执行文件并设置属性
+foreach(target IN LISTS EXECUTABLE_TARGETS)
+    add_executable(${target} ${target}.cu)
+    target_include_directories(${target} PRIVATE ../common)
+    target_compile_features(${target} PRIVATE cxx_std_17 cuda_std_17)
+    
+    # 统一应用编译选项
+    target_compile_options(${target} PRIVATE 
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wno-unused-command-line-argument>
+        $<$<COMPILE_LANGUAGE:CUDA>:$<$<CONFIG:Debug>:-G -O0>>
+        $<$<COMPILE_LANGUAGE:CUDA>:$<$<CONFIG:Release>:-O3>>
+    )
+    
+    install(TARGETS ${target} DESTINATION chapter02)
+endforeach()
