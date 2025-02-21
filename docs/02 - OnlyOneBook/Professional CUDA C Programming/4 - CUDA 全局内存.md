@@ -756,7 +756,7 @@ Check result success!
 
 **统一虚拟寻址(UVA)** 在 CUDA 4.0 中被引入，支持 64 位 Linux 系统。通过 UVA，主机内存和设备内存可以共享同一个虚拟地址空间，如下图所示：
 
-![Unified Virtual Addressing](images/Professional%20CUDA%20C%20Programming/Unified%20Virtual%20Addressing.png)
+![Unified Virtual Addressing](/images/Professional%20CUDA%20C%20Programming/Unified%20Virtual%20Addressing.png)
 
 在没有 UVA 之前，我们需要管理指向主机内存和设备内存的指针。尤其是编写 C 语言代码的时候，多个指针指向不同的数据容易导致混乱，而在 CUDA C 中要经常处理主机和设备内存之间的复制操作，有时候处理起来比较麻烦。但是一旦有了 UVA，指向的内存空间对我们的应用程序代码来说就变得透明了。
 
@@ -866,7 +866,7 @@ cudaError_t cudaMallocManaged(void ** devPtr,size_t size,unsigned int flags=0)
 
 全局内存的加载和存储过程通常通过缓存实现，具体如下图所示:
 
-![Global Memory Access](images/Professional%20CUDA%20C%20Programming/Global%20Memory%20Access.png)
+![Global Memory Access](/images/Professional%20CUDA%20C%20Programming/Global%20Memory%20Access.png)
 
 全局内存是在逻辑层面的模型，在编程时我们需要考虑两种不同的模型：
 
@@ -891,14 +891,13 @@ cudaError_t cudaMallocManaged(void ** devPtr,size_t size,unsigned int flags=0)
 
 1. 一个线程束加载数据，使用一级缓存，并且这个事务所请求的所有数据都在一个 128 字节的对齐的地址段上。上面蓝色区域代表全局内存，下面橙色区域表示线程束需要的数据，绿色区域则代表对齐的地址段
   
-![Aligned Coalesced Memory Accesses](images/Professional%20CUDA%20C%20Programming/Aligned%20Coalesced%20Memory%20Accesses.png)
+![Aligned Coalesced Memory Accesses](/images/Professional%20CUDA%20C%20Programming/Aligned%20Coalesced%20Memory%20Accesses.png)
 
 2. 如果一个事务加载的数据分布在不同的对齐地址段上，会有以下两种情况：
    - **数据是连续的，但不在同一个对齐的段上**。例如，请求访问的数据分布在内存地址`1~128`，这种情况下 `0~127` 和 `128~255` 这两段数据将需要分别传递到 SM 两次
    - **数据是不连续的，也不在同一个对齐的段上**。例如，请求访问的数据分布在内存地址 `0~63` 和 `128~191`，这种情况下也需要两次加载。
 
-
-![None Aligned Coalesced Memory Accesses](images/Professional%20CUDA%20C%20Programming/None%20Aligned%20Coalesced%20Memory%20Accesses.png)
+![None Aligned Coalesced Memory Accesses](/images/Professional%20CUDA%20C%20Programming/None%20Aligned%20Coalesced%20Memory%20Accesses.png)
 
 上图是一个一个典型的线程束，其中数据是分散的。例如，thread0 的请求在 128 之前，后续又有请求在 256 之后，因此需要进行**三个内存事务**。而利用率，即从主存取回的数据被实际使用的比例，为 $\frac {128}{128×3}$。利用率低会导致带宽浪费，最极端的情况是，如果每个线程的请求都位于不同的段上，也就是一个 128 字节的事务只有 1 个字节是有用的，那么利用率只有 $\frac {1}{128}$。
 
@@ -947,23 +946,23 @@ cudaError_t cudaMallocManaged(void ** devPtr,size_t size,unsigned int flags=0)
 
 1. **对齐合并的访问**，利用率 100%
 
-![Aligned and Coalesced Memory Accesses](images/Professional%20CUDA%20C%20Programming/Aligned%20and%20Coalesced%20Memory%20Accesses.png)
+![Aligned and Coalesced Memory Accesses](/images/Professional%20CUDA%20C%20Programming/Aligned%20and%20Coalesced%20Memory%20Accesses.png)
 
 2. **对齐非合并的访问**，每个线程访问的数据都在一个块内，但是位置是交叉的，利用率100%
 
-![Aligned None Coalesced Memory Accesses](images/Professional%20CUDA%20C%20Programming/Aligned%20None%20Coalesced%20Memory%20Accesses.png)
+![Aligned None Coalesced Memory Accesses](/images/Professional%20CUDA%20C%20Programming/Aligned%20None%20Coalesced%20Memory%20Accesses.png)
 
 3. **非对齐合并的访问**，如果线程束请求一个连续的非对齐的32个4字节数据，这些数据会跨越两个内存块，同时没有对齐。在启用一级缓存的情况下，需要进行两个128字节的事务来完成加载操作。
    
-![None Aligned but Coalesced Memory Accesses](images/Professional%20CUDA%20C%20Programming/None%20Aligned%20but%20Coalesced%20Memory%20Accesses.png)
+![None Aligned but Coalesced Memory Accesses](/images/Professional%20CUDA%20C%20Programming/None%20Aligned%20but%20Coalesced%20Memory%20Accesses.png)
 
 4. 当线程束中的所有线程请求同一个地址时，这些数据必定落在同一个缓存行范围内。缓存行是主存中可以一次读取到缓存的一段数据。若每个请求为4字节数据，那么在使用一级缓存时，利用率为 $\frac {4}{128}$
 
-![Threads Request Same Memory Accesses](images/Professional%20CUDA%20C%20Programming/Threads%20Request%20Same%20Memory%20Accesses.png)
+![Threads Request Same Memory Accesses](/images/Professional%20CUDA%20C%20Programming/Threads%20Request%20Same%20Memory%20Accesses.png)
 
 5. **最坏的情况**，线程束内的每个线程请求的数据都位于不同的缓存行上，其中 $1≤N≤32$。因此，当请求32个4字节的数据时，需要N个事务来完成加载操作，此时的利用率为 $\frac{1}{N}$。
 
-![None Aligned None Coalesced Memory Accesses](images/Professional%20CUDA%20C%20Programming/None%20Aligned%20None%20Coalesced%20Memory%20Accesses.png)
+![None Aligned None Coalesced Memory Accesses](/images/Professional%20CUDA%20C%20Programming/None%20Aligned%20None%20Coalesced%20Memory%20Accesses.png)
 
 CPU 和 GPU 的一级缓存有明显的不同。GPU 的一级缓存可以通过编译选项等进行控制，而 CPU 的一级缓存不可控制。此外，CPU 的一级缓存使用一种替换算法，该算法考虑到了数据的使用频率和时间局部性，而 GPU 的一级缓存缺乏这种替换算法。
 
@@ -973,24 +972,24 @@ CPU 和 GPU 的一级缓存有明显的不同。GPU 的一级缓存可以通过�
 
 1. **对齐合并的访问**，使用4个段，利用率 100%
 
-![Aligned Coalesced Uncached Memory Accesses](images/Professional%20CUDA%20C%20Programming/Aligned%20Coalesced%20Uncached%20Memory%20Accesses.png)
+![Aligned Coalesced Uncached Memory Accesses](/images/Professional%20CUDA%20C%20Programming/Aligned%20Coalesced%20Uncached%20Memory%20Accesses.png)
 
 2. **对齐非合并的访问**，都在四个段内，且互不相同，利用率100%
 
-![Aligned None Coalesced Uncached Memory Accesses](images/Professional%20CUDA%20C%20Programming/Aligned%20None%20Coalesced%20Uncached%20Memory%20Accesses.png)
+![Aligned None Coalesced Uncached Memory Accesses](/images/Professional%20CUDA%20C%20Programming/Aligned%20None%20Coalesced%20Uncached%20Memory%20Accesses.png)
 
 
 3. **非对齐合并的访问**，一个段的大小为32字节，因此，一个连续的128字节请求，即使没有按照段的边界对齐，最多也只涉及到5个段。因此，内存的利用率可以达到 5/6 ≈ 80%
 
-![None Aligned Coalesced Uncached Memory Accesses](images/Professional%20CUDA%20C%20Programming/None%20Aligned%20Coalesced%20Uncached%20Memory%20Accesses.png)
+![None Aligned Coalesced Uncached Memory Accesses](/images/Professional%20CUDA%20C%20Programming/None%20Aligned%20Coalesced%20Uncached%20Memory%20Accesses.png)
 
 4. 所有线程访问一个4字节的数据，那么此时的利用率是 4/32=12.5%
 
-![Threads Request Same Uncached Memory Accesses](images/Professional%20CUDA%20C%20Programming/Threads%20Request%20Same%20Uncached%20Memory%20Accesses.png)
+![Threads Request Same Uncached Memory Accesses](/images/Professional%20CUDA%20C%20Programming/Threads%20Request%20Same%20Uncached%20Memory%20Accesses.png)
 
 5.  **最坏的情况**，当目标数据分散在内存的各个角落时，可能需要N个内存段来获取数据。在这种情况下，与使用一级缓存相比仍然具有优势，因为 $N×128$ 相比于 $N×32$ 还是大很多的。
 
-![None Aligned None Coalesced Uncached Memory Accesses](images/Professional%20CUDA%20C%20Programming/None%20Aligned%20None%20Coalesced%20Uncached%20Memory%20Accesses.png)
+![None Aligned None Coalesced Uncached Memory Accesses](/images/Professional%20CUDA%20C%20Programming/None%20Aligned%20None%20Coalesced%20Uncached%20Memory%20Accesses.png)
 
 ##### 3.2.3. 非对齐读取示例 Example of Misaligned Reads
 
