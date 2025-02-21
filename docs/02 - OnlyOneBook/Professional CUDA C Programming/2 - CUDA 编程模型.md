@@ -1769,8 +1769,8 @@ nvidia-smi -q -i 0 -d UTILIZATION | tail -n 4  # 利用率
 
 ### 书籍出处
 
-- [CUDA C编程权威指南](asset/CUDA%20&%20GPU%20Programming/CUDA%20C编程权威指南.pdf)
-- [Professional CUDA C Programming](asset/CUDA%20&%20GPU%20Programming/Professional%20CUDA%20C%20Programming.pdf)
+- [CUDA C编程权威指南](/asset/CUDA%20&%20GPU%20Programming/CUDA%20C编程权威指南.pdf)
+- [Professional CUDA C Programming](/asset/CUDA%20&%20GPU%20Programming/Professional%20CUDA%20C%20Programming.pdf)
 
 ### 网页链接
 
