@@ -1,4 +1,4 @@
-## 4 - CUDA 全局内存
+## 4 - CUDA 全局内存 CUDA Global Memory
 
 ---
 
@@ -21,7 +21,7 @@
 
 现代计算机的内存结构通常包括以下部分：
 
-![CUDA Memory Architecture](images/Professional%20CUDA%20C%20Programming/CUDA%20Memory%20Architecture.png)
+![CUDA Memory Architecture](/images/Professional%20CUDA%20C%20Programming/CUDA%20Memory%20Architecture.png)
 
 这个内存模型包括**寄存器**、**缓存**、**主存**和**大容量磁盘**，也是大部分冯诺依曼计算机结构的存储结构。已经学习过串行编程的人应该对内存模型有所了解，最快的存储器是寄存器，它可以与 CPU 同步协作；其次是缓存，位于 CPU 芯片上。然后是主存储器，通常是内存条，显卡上也有内存芯片（即显存），最慢的是硬盘。这些内存设备的速度和容量呈反比关系，**速度越快，容量越小；速度越慢，容量越大**。
 
@@ -61,7 +61,7 @@ GPU 和 CPU 在内存层次结构设计中遵循相似的准则和模型。其�
 
 在一个应用程序中，全局内存、常量内存和纹理内存具有相同的生命周期。下图为这些内存空间的层次结构，后面的内容将逐一介绍这些内存的特性和用法。
 
-![CUDA Memory Architecture Model](images/Professional%20CUDA%20C%20Programming/CUDA%20Memory%20Architecture%20Model.png)
+![CUDA Memory Architecture Model](/images/Professional%20CUDA%20C%20Programming/CUDA%20Memory%20Architecture%20Model.png)
 
 ##### 1.2.1. 寄存器 Registers
 
