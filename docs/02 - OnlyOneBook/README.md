@@ -14,7 +14,15 @@
 
 ### 5
 
-### 6
+### 6. 视频资源链接
+
+**百度网盘**：链接: https://pan.baidu.com/s/13DBJIw70LdKNGKTeV3UacQ?pwd=xent 提取码: xent
+**夸克网盘**：链接: https://pan.quark.cn/s/d1c8b35bd077 提取码：7hZM
+
+1. 侯捷老师全系列八部曲 - 手把手教你进阶系列：Cpp文件夹
+
+
+
 
 ---
 
