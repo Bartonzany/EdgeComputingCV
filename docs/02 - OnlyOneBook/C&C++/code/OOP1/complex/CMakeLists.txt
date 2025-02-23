@@ -33,4 +33,4 @@ if(PROJECT_BINARY_DIR STREQUAL PROJECT_SOURCE_DIR)
     message(FATAL_ERROR "The binary directory cannot be the same as source directory")
 endif()
 
-install(TARGETS complex DESTINATION complex)
+install(TARGETS complex DESTINATION OOP1)

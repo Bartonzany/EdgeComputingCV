@@ -29,4 +29,4 @@ if(PROJECT_BINARY_DIR STREQUAL PROJECT_SOURCE_DIR)
     message(FATAL_ERROR "The binary directory cannot be the same as source directory")
 endif()
 
-install(TARGETS string DESTINATION string)
+install(TARGETS string DESTINATION OOP1)

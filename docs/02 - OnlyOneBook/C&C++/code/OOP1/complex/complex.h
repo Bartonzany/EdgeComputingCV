@@ -19,7 +19,6 @@ class complex {
             re(r), im(i) {}
 
         // 函数重载，设计为成员函数，在类声明内定义的函数会自动成为inline函数
-        //
         complex &operator+=(const complex &);
         complex &operator-=(const complex &);
         complex &operator*=(const complex &);
