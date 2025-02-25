@@ -29,9 +29,9 @@ int main(int argc, char** argv) {
     memset(res_from_gpu_h, 0, nByte);
 
     float *a_d, *b_d, *res_d;
-    CHECK(cudaMalloc((float**)&a_d, nByte));
-    CHECK(cudaMalloc((float**)&b_d, nByte));
-    CHECK(cudaMalloc((float**)&res_d, nByte));
+    CHECK(cudaMallocHost((float**)&a_d, nByte));
+    CHECK(cudaMallocHost((float**)&b_d, nByte));
+    CHECK(cudaMallocHost((float**)&res_d, nByte));
 
     initialData(a_h, nElem);
     initialData(b_h, nElem);
@@ -48,9 +48,9 @@ int main(int argc, char** argv) {
     sumArrays(a_h, b_h, res_h, nElem);
 
     checkResult(res_h, res_from_gpu_h, nElem);
-    cudaFree(a_d);
-    cudaFree(b_d);
-    cudaFree(res_d);
+    cudaFreeHost(a_d);
+    cudaFreeHost(b_d);
+    cudaFreeHost(res_d);
 
     free(a_h);
     free(b_h);
