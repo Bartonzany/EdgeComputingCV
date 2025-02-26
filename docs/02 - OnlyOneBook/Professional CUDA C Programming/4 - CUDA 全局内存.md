@@ -1165,7 +1165,6 @@ Device "NVIDIA GeForce GTX 1060 6GB (0)"
 | 11  | 0.001490      | 80%             | 0.001522      | 80%             |
 | 128 | 0.001466      | 100%            | 0.001471      | 100%            |
 
-
 这里我们使用的指标是：
 
 $$
@@ -1177,8 +1176,489 @@ $$
 - 偏移量为0时（128），效率最高，**有偏移量会导致全局内存加载效率降低**；
 - **有 L1 缓存在所有偏移量下均略快于无 L1 缓存**，缓存缺失对**非对齐访问**的性能影响更大- 
 
+##### 3.2.4. 只读缓存 Read-Only Cache
 
+**只读缓存（Read-Only Cache）** 最初是专为纹理内存加载而设计的。然而，自 Kepler 架构及以上的设备开始，只读缓存也被扩展用于支持全局内存的加载，从而可以替代部分一级缓存的功能。在这些设备上，开发者**可以通过只读缓存直接从全局内存中读取数据**。
 
+只读缓存的访问粒度为**32字节**，这种特性使其在处理非连续或分散的内存访问时，相比一级缓存展现出更好的性能。为了利用只读缓存，CUDA提供了两种主要的方法：
+
+1. 使用内置函数 `__ldg`：这是一个CUDA内置函数，专门用于从只读缓存中加载数据。
+2. 使用指针修饰符：在指针声明时使用 `__restrict__` 和 `const` 修饰符，可以提示编译器该指针所指向的数据是只读的，从而可能利用只读缓存。
+
+```c
+__global__ void copyKernel(const float* __restrict__ in, float* out) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    out[idx] = __ldg(&in[idx]);
+}
+```
+
+在这个例子中，`copyKernel` 核函数通过 `__ldg` 函数从全局内存 `in` 中读取数据，并将其写入 `out` 数组。通过这种方式，可以确保数据通过只读缓存进行加载，从而提高访问效率。
+
+#### 3.3. 全局内存写入 Global Memory Writes
+
+内存的写入（存储）操作与读取（加载）操作在机制上存在显著差异。写入操作相对简单，在 Fermi 和 Kepler 架构的GPU中，一级缓存（L1 Cache）并不用于存储操作，而是直接通过二级缓存（L2 Cache）进行。**存储操作以 32 字节为粒度执行**，并且内存事务会根据地址的分布被划分为一段、两段或四段。
+
+具体来说，如果两个存储地址位于同一个 128 字节的段内，但不在同一个 64 字节的子段内，则会触发一个四段事务。类似地，其他情况会根据地址的分布触发相应数量的事务段。这种分段机制是为了优化存储操作的效率，减少不必要的内存带宽消耗。
+
+内存写入分为以下几种情况：
+
+1. **连续写入**：在这种情况下，多个线程对**相邻的内存地址**进行写入操作。存储事务可以高效地合并为较少的事务段，从而提高写入效率。例如，若访问一个连续的 128 字节范围，则可通过一个四段事务完成存储操作。
+   ![](../../../images/Professional%20CUDA%20C%20Programming/Pasted%20image%2020250226173210.png)
+2. **分散写入**：此时，多个线程写入**非连续的内存地址**。这种写入模式可能会触发多个事务段，导致写入效率下降。例如，若分散在一个192字节的范围内的地址不连续，则可能需要使用3个单段事务来完成写入操作。
+   ![](../../../images/Professional%20CUDA%20C%20Programming/Pasted%20image%2020250226173235.png)
+3. **对齐写入**：在对齐写入中，内存地址按照缓存**行对齐**。这种写入方式有助于减少事务段的数量，从而提升存储操作的效率。例如，若在一个64字节的范围内进行对齐写入，通常只需使用一个两段事务即可完成。
+   ![](../../../images/Professional%20CUDA%20C%20Programming/Pasted%20image%2020250226173253.png)
+4. **非对齐写入**：与对齐写入相反，非对齐写入是指内存地址没有按照缓存行对齐。这种情况下，可能会导致事务段数量增加，从而降低存储操作的效率。
+
+#### 3.4. 结构体数组和数组结构体 Array of Structures versus Structure of Arrays
+
+**数组结构体（Array of Structs, AoS）** 是指将多个**结构体实例存储在数组**中。每个结构体实例包含多个字段，这些字段在内存中是连续存储的。这种布局在面向对象的编程中非常常见，因为它能够将相关的数据组织在一起。举例如下：
+
+```cpp
+struct innerStruct {
+    float x;
+    float y;
+    float z;
+};
+
+Point innerStruct[100];  // 数组结构体
+```
+
+**结构体数组（Struct of Arrays, SoA）** 是指将多个数组存储在结构体中，每个数组对应结构体的一个字段。这种布局在 CUDA 编程中更为常见，因为它能够优化内存访问模式，特别是在并行计算中。举例如下：
+
+```cpp
+struct innerArray {
+    float x[100];
+    float y[100];
+    float z[100];
+};
+
+Points innerArray;       // 结构体数组
+```
+
+当一个线程需要访问结构体中的某个特定成员时，**结构体数组（SoA）** 的内存访问模式是连续的，而**数组结构体（AoS）** 的访问模式则是不连续的。这种不连续性会导致内存访问效率显著降低。如图所示，Aos 的访问效率只有50%。
+
+![](../../../images/Professional%20CUDA%20C%20Programming/Pasted%20image%2020250226201007.png)
+
+总结如下：
+
+- **AoS** 适合需要同时访问结构体中多个字段的情况，但在 CUDA 中可能会导致内存访问不连续，从而降低性能。
+- **SoA** 适合需要同时访问多个元素的同一字段的情况，能够提高内存访问的连续性，从而提升性能。
+
+##### 3.4.1. AoS 数据布局简单数学运算 Simple Math with the AoS Data Layout
+
+代码在 `chapter04/AoS.cu`  中：
+
+```cpp
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include "common.h"
+
+struct naiveStruct {
+        float a;
+        float b;
+};
+
+void sumArrays(float* a, float* b, float* res, const int size) {
+    for (int i = 0; i < size; i++) {
+        res[i] = a[i] + b[i];
+    }
+}
+__global__ void sumArraysGPU(float* a, float* b, struct naiveStruct* res, int n) {
+    // int i=threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n)
+        res[i].a = a[i] + b[i];
+}
+
+void checkResult_struct(float* res_h, struct naiveStruct* res_from_gpu_h, int nElem) {
+    for (int i = 0; i < nElem; i++)
+        if (res_h[i] != res_from_gpu_h[i].a) {
+            printf("check fail!\n");
+            exit(0);
+        }
+    printf("result check success!\n");
+}
+
+int main(int argc, char** argv) {
+    int dev = 0;
+    cudaSetDevice(dev);
+
+    int nElem  = 1 << 18;
+    printf("Vector size:%d\n", nElem);
+    int                 nByte          = sizeof(float) * nElem;
+    int                 nByte_struct   = sizeof(struct naiveStruct) * nElem;
+    float*              a_h            = (float*)malloc(nByte);
+    float*              b_h            = (float*)malloc(nByte);
+    float*              res_h          = (float*)malloc(nByte_struct);
+    struct naiveStruct* res_from_gpu_h = (struct naiveStruct*)malloc(nByte_struct);
+    memset(res_h, 0, nByte);
+    memset(res_from_gpu_h, 0, nByte);
+
+    float *             a_d, *b_d;
+    struct naiveStruct* res_d;
+    CHECK(cudaMalloc((float**)&a_d, nByte));
+    CHECK(cudaMalloc((float**)&b_d, nByte));
+    CHECK(cudaMalloc((struct naiveStruct**)&res_d, nByte_struct));
+    CHECK(cudaMemset(res_d, 0, nByte_struct));
+    initialData(a_h, nElem);
+    initialData(b_h, nElem);
+
+    CHECK(cudaMemcpy(a_d, a_h, nByte, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(b_d, b_h, nByte, cudaMemcpyHostToDevice));
+
+    dim3   block(1024);
+    dim3   grid(nElem / block.x);
+    double iStart, iElaps;
+    iStart = cpuSecond();
+    sumArraysGPU<<<grid, block>>>(a_d, b_d, res_d, nElem);
+    cudaDeviceSynchronize();
+    iElaps = cpuSecond() - iStart;
+    CHECK(cudaMemcpy(res_from_gpu_h, res_d, nByte_struct, cudaMemcpyDeviceToHost));
+    printf("Execution configuration %d,%d Time elapsed %f sec\n", grid.x, block.x, iElaps);
+
+    sumArrays(a_h, b_h, res_h, nElem);
+
+    checkResult_struct(res_h, res_from_gpu_h, nElem);
+    cudaFree(a_d);
+    cudaFree(b_d);
+    cudaFree(res_d);
+
+    free(a_h);
+    free(b_h);
+    free(res_h);
+    free(res_from_gpu_h);
+
+    return 0;
+}
+```
+
+```shell
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# nvprof --metrics gst_efficiency  ./AoS_without_L1cache
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, naiveStruct*, int)
+          1                            gst_efficiency            Global Memory Store Efficiency      50.00%      50.00%      50.00%
+```
+
+```shell
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04#  nvprof --metrics gst_efficiency ./AoS_with_L1cache
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, naiveStruct*, int)
+          1                            gst_efficiency            Global Memory Store Efficiency      50.00%      50.00%      50.00%
+```
+
+##### 3.4.2 SoA数据布局的简单数学运算
+
+代码在 `chapter04/SoA.cu`  中：
+
+```c
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include "common.h"
+
+#define SIZE (1 << 18)
+struct naiveStruct {
+        float a[SIZE];
+        float b[SIZE];
+};
+void sumArrays(float* a, float* b, float* res, const int size) {
+    for (int i = 0; i < size; i++) {
+        res[i] = a[i] + b[i];
+    }
+}
+__global__ void sumArraysGPU(float* a, float* b, struct naiveStruct* res, int n) {
+    // int i=threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n)
+        (res->a)[i] = a[i] + b[i];
+}
+void checkResult_struct(float* res_h, struct naiveStruct* res_from_gpu_h, int nElem) {
+    for (int i = 0; i < nElem; i++)
+        if (res_h[i] != (res_from_gpu_h->a)[i]) {
+            printf("check fail!\n");
+            exit(0);
+        }
+    printf("result check success!\n");
+}
+int main(int argc, char** argv) {
+    int dev = 0;
+    cudaSetDevice(dev);
+
+    int nElem = SIZE;
+    printf("Vector size:%d\n", nElem);
+    int                 nByte          = sizeof(float) * nElem;
+    int                 nByte_struct   = sizeof(struct naiveStruct);
+    float*              a_h            = (float*)malloc(nByte);
+    float*              b_h            = (float*)malloc(nByte);
+    float*              res_h          = (float*)malloc(nByte_struct);
+    struct naiveStruct* res_from_gpu_h = (struct naiveStruct*)malloc(nByte_struct);
+    memset(res_h, 0, nByte);
+    memset(res_from_gpu_h, 0, nByte);
+
+    float *             a_d, *b_d;
+    struct naiveStruct* res_d;
+    CHECK(cudaMalloc((float**)&a_d, nByte));
+    CHECK(cudaMalloc((float**)&b_d, nByte));
+    CHECK(cudaMalloc((struct naiveStruct**)&res_d, nByte_struct));
+    CHECK(cudaMemset(res_d, 0, nByte_struct));
+    initialData(a_h, nElem);
+    initialData(b_h, nElem);
+
+    CHECK(cudaMemcpy(a_d, a_h, nByte, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(b_d, b_h, nByte, cudaMemcpyHostToDevice));
+
+    dim3   block(1024);
+    dim3   grid(nElem / block.x);
+    double iStart, iElaps;
+    iStart = cpuSecond();
+    sumArraysGPU<<<grid, block>>>(a_d, b_d, res_d, nElem);
+    cudaDeviceSynchronize();
+    iElaps = cpuSecond() - iStart;
+    CHECK(cudaMemcpy(res_from_gpu_h, res_d, nByte_struct, cudaMemcpyDeviceToHost));
+    printf("Execution configuration %d,%d Time elapsed %f sec\n", grid.x, block.x, iElaps);
+
+    sumArrays(a_h, b_h, res_h, nElem);
+
+    checkResult_struct(res_h, res_from_gpu_h, nElem);
+    cudaFree(a_d);
+    cudaFree(b_d);
+    cudaFree(res_d);
+
+    free(a_h);
+    free(b_h);
+    free(res_h);
+    free(res_from_gpu_h);
+
+    return 0;
+}
+```
+
+```shell
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# nvprof --metrics gst_efficiency  ./SoA_without_L1cache
+==126407== NVPROF is profiling process 126407, command: ./SoA_without_L1cache
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, naiveStruct*, int)
+          1                            gst_efficiency            Global Memory Store Efficiency     100.00%     100.00%     100.00%
+```
+
+```shell
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# nvprof --metrics gst_efficiency  ./SoA_with_L1cache
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, naiveStruct*, int)
+          1                            gst_efficiency            Global Memory Store Efficiency     100.00%     100.00%     100.00%
+```
+
+可以看出，实验结果是和理论相符合的。
+
+#### 3.5. 性能调整
+
+优化设备内存带宽利用率有两个目标：
+
+1. 对齐合并内存访问，以减少带宽的浪费
+2. 足够的并发内存操作，以隐藏内存延迟
+
+在[3 - CUDA 执行模型](3%20-%20CUDA%20执行模型.md)中，我们已经讲过如何优化指令吞吐量的核函数，实现并发内存访问最大化是通过以下方式获得的：
+
+1. 增加每个线程中执行独立内存操作的数量
+2. 对核函数启动的执行配置进行试验，以充分体现每个 SM 的并行性
+
+##### 3.5.1. 展开技术
+
+将[3 - CUDA 执行模型](3%20-%20CUDA%20执行模型.md)提到的展开技术用到向量加法上，可以查看内存利用效率，代码在 `chapter04/sumArrayOffsetUnrolling.cu` 中：
+
+```c
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include "common.h"
+
+void sumArrays(float* a, float* b, float* res, int offset, const int size) {
+    for (int i = 0, k = offset; k < size; i++, k++) {
+        res[i] = a[k] + b[k];
+    }
+}
+__global__ void sumArraysGPU(float* a, float* b, float* res, int offset, int n) {
+    // int i=threadIdx.x;
+    int i = blockIdx.x * blockDim.x * 4 + threadIdx.x;
+    int k = i + offset;
+    if (k + 3 * blockDim.x < n) {
+        res[i]                  = a[k] + b[k];
+        res[i + blockDim.x]     = a[k + blockDim.x] + b[k + blockDim.x];
+        res[i + blockDim.x * 2] = a[k + blockDim.x * 2] + b[k + blockDim.x * 2];
+        res[i + blockDim.x * 3] = a[k + blockDim.x * 3] + b[k + blockDim.x * 3];
+    }
+}
+
+int main(int argc, char** argv) {
+    int dev = 0;
+    cudaSetDevice(dev);
+    int block_x = 512;
+    int nElem   = 1 << 18;
+    int offset  = 0;
+    if (argc == 2)
+        offset = atoi(argv[1]);
+    else if (argc == 3) {
+        offset  = atoi(argv[1]);
+        block_x = atoi(argv[2]);
+    }
+    printf("Vector size:%d\n", nElem);
+    int    nByte          = sizeof(float) * nElem;
+    float* a_h            = (float*)malloc(nByte);
+    float* b_h            = (float*)malloc(nByte);
+    float* res_h          = (float*)malloc(nByte);
+    float* res_from_gpu_h = (float*)malloc(nByte);
+    memset(res_h, 0, nByte);
+    memset(res_from_gpu_h, 0, nByte);
+
+    float *a_d, *b_d, *res_d;
+    CHECK(cudaMalloc((float**)&a_d, nByte));
+    CHECK(cudaMalloc((float**)&b_d, nByte));
+    CHECK(cudaMalloc((float**)&res_d, nByte));
+    CHECK(cudaMemset(res_d, 0, nByte));
+    initialData(a_h, nElem);
+    initialData(b_h, nElem);
+
+    CHECK(cudaMemcpy(a_d, a_h, nByte, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(b_d, b_h, nByte, cudaMemcpyHostToDevice));
+
+    dim3   block(block_x);
+    dim3   grid(nElem / block.x);
+    double iStart, iElaps;
+    iStart = cpuSecond();
+    sumArraysGPU<<<grid, block>>>(a_d, b_d, res_d, offset, nElem);
+    cudaDeviceSynchronize();
+    iElaps = cpuSecond() - iStart;
+
+    printf("warmup Time elapsed %f sec\n", iElaps);
+    iStart = cpuSecond();
+    sumArraysGPU<<<grid, block>>>(a_d, b_d, res_d, offset, nElem);
+    cudaDeviceSynchronize();
+    iElaps = cpuSecond() - iStart;
+    CHECK(cudaMemcpy(res_from_gpu_h, res_d, nByte, cudaMemcpyDeviceToHost));
+    printf("Execution configuration %d,%d Time elapsed %f sec --offset:%d \n", grid.x, block.x, iElaps, offset);
+
+    sumArrays(a_h, b_h, res_h, offset, nElem);
+
+    checkResult(res_h, res_from_gpu_h, nElem - 4 * block_x);
+    cudaFree(a_d);
+    cudaFree(b_d);
+    cudaFree(res_d);
+
+    free(a_h);
+    free(b_h);
+    free(res_h);
+    free(res_from_gpu_h);
+
+    return 0;
+}
+```
+
+执行时间：
+
+```shell
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 0
+Vector size:262144
+warmup Time elapsed 0.000133 sec
+Execution configuration<<<512,512>>> Time elapsed 0.000026 sec --offset:0 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 1
+Vector size:262144
+warmup Time elapsed 0.000133 sec
+Execution configuration<<<512,512>>> Time elapsed 0.000027 sec --offset:1 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 11
+Vector size:262144
+warmup Time elapsed 0.000138 sec
+Execution configuration<<<512,512>>> Time elapsed 0.000028 sec --offset:11 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 128
+Vector size:262144
+warmup Time elapsed 0.000139 sec
+Execution configuration<<<512,512>>> Time elapsed 0.000028 sec --offset:128 
+Check result success!
+```
+
+nvprof 内存效率：
+
+```shell
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# nvprof --metrics gst_efficiency,gld_efficiency ./sumArrayOffsetUnrolling_without_L1cache 
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, float*, int, int)
+          2                            gst_efficiency            Global Memory Store Efficiency     100.00%     100.00%     100.00%
+          2                            gld_efficiency             Global Memory Load Efficiency     100.00%     100.00%     100.00%
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# nvprof --metrics gst_efficiency,gld_efficiency ./sumArrayOffsetUnrolling_with_L1cache 
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, float*, int, int)
+          2                            gst_efficiency            Global Memory Store Efficiency     100.00%     100.00%     100.00%
+          2                            gld_efficiency             Global Memory Load Efficiency     100.00%     100.00%     100.00%
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# nvprof --metrics gst_efficiency,gld_efficiency ./sumArrayOffsetUnrolling_without_L1cache 11
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, float*, int, int)
+          2                            gst_efficiency            Global Memory Store Efficiency     100.00%     100.00%     100.00%
+          2                            gld_efficiency             Global Memory Load Efficiency      80.00%      80.00%      80.00%
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# nvprof --metrics gst_efficiency,gld_efficiency ./sumArrayOffsetUnrolling_with_L1cache 11
+Invocations                               Metric Name                        Metric Description         Min         Max         Avg
+Device "NVIDIA GeForce GTX 1060 6GB (0)"
+    Kernel: sumArraysGPU(float*, float*, float*, int, int)
+          2                            gst_efficiency            Global Memory Store Efficiency     100.00%     100.00%     100.00%
+          2                            gld_efficiency             Global Memory Load Efficiency      80.00%      80.00%      80.00%
+```
+
+##### 3.5.2. 增大并行性
+
+通过调整块的大小来实现并行性调整，执行效果如下：
+
+```shell
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 0 1024
+Vector size:262144
+warmup Time elapsed 0.000139 sec
+Execution configuration<<<256,1024>>> Time elapsed 0.000027 sec --offset:0 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 0 512
+Vector size:262144
+warmup Time elapsed 0.000133 sec
+Execution configuration<<<512,512>>> Time elapsed 0.000027 sec --offset:0 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 0 256
+Vector size:262144
+warmup Time elapsed 0.000130 sec
+Execution configuration<<<1024,256>>> Time elapsed 0.000026 sec --offset:0 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 0 128
+Vector size:262144
+warmup Time elapsed 0.000132 sec
+Execution configuration<<<2048,128>>> Time elapsed 0.000028 sec --offset:0 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 0 64
+Vector size:262144
+warmup Time elapsed 0.000139 sec
+Execution configuration<<<4096,64>>> Time elapsed 0.000032 sec --offset:0 
+Check result success!
+
+root@linxi1989:/EdgeComputingCV/docs/02 - OnlyOneBook/Professional CUDA C Programming/code/bin/chapter04# ./sumArrayOffsetUnrolling_without_L1cache 0 32
+Vector size:262144
+warmup Time elapsed 0.000148 sec
+Execution configuration<<<8192,32>>> Time elapsed 0.000042 sec --offset:0 
+Check result success!
+```
+
+由于数据量少，所以时间差距不大，在这台机器上 256 有最佳速度，不仅因为内存，还有并行性等多方面因素。
 
 ### 4. 
 
