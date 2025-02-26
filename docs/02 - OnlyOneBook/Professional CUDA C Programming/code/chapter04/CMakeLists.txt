@@ -32,6 +32,33 @@ foreach(target IN LISTS EXECUTABLE_TARGETS)
     install(TARGETS ${target} DESTINATION chapter04)
 endforeach()
 
+
+# 定义一个宏来简化重复的配置
+macro(configure_experiment target_name source_file)
+    add_executable(${target_name} ${source_file})
+    target_include_directories(${target_name} PRIVATE ../common)
+    target_compile_features(${target_name} PRIVATE cxx_std_17 cuda_std_17)
+    
+    # 根据目标名称设置不同的编译选项
+    if(target_name MATCHES "_with_L1cache")
+        target_compile_options(${target_name} PRIVATE 
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wno-unused-command-line-argument>
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-dlcm=cg>  # 启用一级缓存
+        )
+    elseif(target_name MATCHES "_without_L1cache")
+        target_compile_options(${target_name} PRIVATE 
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wno-unused-command-line-argument>
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-dlcm=ca>  # 不启用一级缓存
+        )
+    endif()
+
+    target_compile_options(${target_name} PRIVATE 
+        $<$<COMPILE_LANGUAGE:CUDA>:$<$<CONFIG:Debug>:-G -O0>>
+        $<$<COMPILE_LANGUAGE:CUDA>:$<$<CONFIG:Release>:-O3>>
+    )
+    install(TARGETS ${target_name} DESTINATION chapter04)
+endmacro()
+
 # L1 内存实验
 set(SUMARRAYOFFSET_TARGETS
     sumArrayOffset_with_L1cache
@@ -39,26 +66,35 @@ set(SUMARRAYOFFSET_TARGETS
 )
 
 foreach(target IN LISTS SUMARRAYOFFSET_TARGETS)
-    add_executable(${target} sumArrayOffset.cu)
-    target_include_directories(${target} PRIVATE ../common)
-    target_compile_features(${target} PRIVATE cxx_std_17 cuda_std_17)
-    
-    # 根据目标名称设置不同的编译选项
-    if(target STREQUAL "sumArrayOffset_with_L1cache")
-        target_compile_options(${target} PRIVATE 
-            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wno-unused-command-line-argument>
-            $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-dlcm=cg>  # 启用一级缓存
-        )
-    elseif(target STREQUAL "sumArrayOffset_without_L1cache")
-        target_compile_options(${target} PRIVATE 
-            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wno-unused-command-line-argument>
-            $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-dlcm=ca>  # 不启用一级缓存
-        )
-    endif()
+    configure_experiment(${target} sumArrayOffset.cu)
+endforeach()
 
-    target_compile_options(${target} PRIVATE 
-        $<$<COMPILE_LANGUAGE:CUDA>:$<$<CONFIG:Debug>:-G -O0>>
-        $<$<COMPILE_LANGUAGE:CUDA>:$<$<CONFIG:Release>:-O3>>
-    )
-    install(TARGETS ${target} DESTINATION chapter04)
+# AoS 内存实验
+set(AoS_TARGETS
+    AoS_with_L1cache
+    AoS_without_L1cache
+)
+
+foreach(target IN LISTS AoS_TARGETS)
+    configure_experiment(${target} AoS.cu)
+endforeach()
+
+# SoA 内存实验
+set(SoA_TARGETS
+    SoA_with_L1cache
+    SoA_without_L1cache
+)
+
+foreach(target IN LISTS SoA_TARGETS)
+    configure_experiment(${target} SoA.cu)
+endforeach()
+
+# sumArrayOffsetUnrolling 内存实验
+set(sumArrayOffsetUnrolling_TARGETS
+    sumArrayOffsetUnrolling_with_L1cache
+    sumArrayOffsetUnrolling_without_L1cache
+)
+
+foreach(target IN LISTS sumArrayOffsetUnrolling_TARGETS)
+    configure_experiment(${target} sumArrayOffsetUnrolling.cu)
 endforeach()
