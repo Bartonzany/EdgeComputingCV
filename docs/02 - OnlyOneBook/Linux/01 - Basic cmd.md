@@ -1,4 +1,18 @@
-##  Linux基本命令使用
+---
+aliases:
+  - Linux基本命令使用
+  - Linux CMD
+title: Linux 基本命令使用
+date: 2025-02-27 14:11:35
+excerpt: 一些常用的命令行总结
+tags:
+  - Ubunutu
+  - Linux
+  - shell
+---
+
+
+##  Linux 基本命令使用
 
 ---
 
@@ -219,7 +233,56 @@ usermod -d [new_dir] [username]       # 修改用户的主目录
 usermod -s [new_shell] [username]     # 修改用户的登录Shell
 ```
 
-### 5. 
+### 5. 实用指令
+
+#### 5.1. 指定运行级别
+
+在 Linux 系统中，运行级别（Runlevel）定义了系统的运行状态，即系统启动后进入的不同操作模式。每个运行级别对应一组特定的服务和进程。Ubuntu 是基于 Debian 的 Linux 发行版，它使用 Systemd 作为初始化系统，但传统的运行级别概念仍然存在。
+
+在较早的版本（如使用 SysVinit 的 Linux 发行版）中，常见的运行级别有：
+
+1. **运行级别 0**：系统关机。
+2. **运行级别 1**：单用户模式（救援模式），通常用于系统维护。
+3. **运行级别 2**：多用户模式，没有网络服务（在 Debian/Ubuntu 中，通常与运行级别 3 相同）。
+4. **运行级别 3**：多用户模式，带有网络服务（命令行界面）。
+5. **运行级别 4**：未使用，用户可以自定义。
+6. **运行级别 5**：图形用户界面（GUI）模式。
+7. **运行级别 6**：系统重启。
+
+从 Ubuntu 15.04 版本开始，Systemd 已经取代了传统的 SysVinit 系统，但为了兼容性，Systemd 提供了与运行级别对应的目标（target）。以下是 Ubuntu 中运行级别与 Systemd 目标的对应关系：
+
+- **运行级别 0**：`poweroff.target`
+- **运行级别 1**：`rescue.target`
+- **运行级别 2, 3, 4**：`multi-user.target`
+- **运行级别 5**：`graphical.target`
+- **运行级别 6**：`reboot.target`
+
+可以使用 `init` 命令切换系统的运行级别：
+
+```shell
+sudo init 0  # 关机
+sudo init 6  # 重启
+sudo init 1  # 进入单用户模式
+sudo init 3  # 进入多用户文本模式
+sudo init 5  # 进入多用户图形模式
+
+```
+
+也可以使用 `systemctl` 命令来切换目标：
+
+```shell
+# 查看当前的运行级别
+systemctl get-default
+
+# 切换到图形界面模式
+sudo systemctl isolate graphical.target
+
+# 切换到多用户模式
+sudo systemctl isolate multi-user.target
+
+# 设置默认运行级别为图形界面模式
+sudo systemctl set-default graphical.target
+```
 
 ### 6. 
 
