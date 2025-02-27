@@ -1,6 +1,4 @@
-## LLM Inference
 
----
 
 本文是论文《Towards Efficient Generative Large Language Model Serving: A Survey from Algorithms to Systems》的大部分内容的中文翻译，翻译使用 DeepseekV3 和 GPT-4o-mini 模型。
 
@@ -264,14 +262,3 @@ LLM推理的另一个独特挑战是**序列的输入长度和输出长度都可
 
 高效的LLM服务是民主化访问先进AI技术的基本步骤。本调查旨在为研究人员、从业者和开发者提供对现有方法的全面理解，使他们在现实环境中部署LLM时能够做出明智的决策。通过整合算法和系统的最新研究成果，本调查论文希望加速进展并促进创新，以追求高效的LLM服务解决方案。
 
----
-
-## 参考引用
-
-### 书籍出处
-
-- [2023-Towards Efficient Generative Large Language Model Serving](../../../../asset/LLM/paper/2023-Towards%20Efficient%20Generative%20Large%20Language%20Model%20Serving.pdf)
-
-### 网页链接
-
-- [LLM模型部署综述 - 知乎](https://zhuanlan.zhihu.com/p/688282337)
