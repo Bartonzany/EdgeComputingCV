@@ -1,3 +1,13 @@
+---
+aliases:
+  - CUDA 执行模型
+title: CUDA 执行模型 CUDA Execution Model
+date: 2025-02-27 12:58:19
+excerpt: CUDA 入门，给新手一些指引
+tags:
+  - CUDA
+---
+
 ## 3 - CUDA 执行模型 CUDA Execution Model
 
 ---

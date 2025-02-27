@@ -1,3 +1,13 @@
+---
+aliases:
+  - CUDA 全局内存
+title: CUDA 全局内存 CUDA Global Memory
+date: 2025-02-27 12:58:19
+excerpt: CUDA 入门，给新手一些指引
+tags:
+  - CUDA
+---
+
 ## 4 - CUDA 全局内存 CUDA Global Memory
 
 ---

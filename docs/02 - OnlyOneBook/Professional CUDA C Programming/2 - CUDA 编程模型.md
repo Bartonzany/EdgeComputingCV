@@ -1,4 +1,14 @@
-## CUDA C 编程入门 2 - CUDA 编程模型 CUDA Programming Model
+---
+aliases:
+  - CUDA 编程模型
+title: CUDA 编程模型 CUDA Programming Model
+date: 2025-02-27 12:58:19
+excerpt: CUDA 入门，给新手一些指引
+tags:
+  - CUDA
+---
+
+## 2 - CUDA 编程模型 CUDA Programming Model
 
 ---
 
