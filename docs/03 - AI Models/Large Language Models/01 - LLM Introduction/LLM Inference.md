@@ -1,8 +1,28 @@
+---
+aliases:
+  - Towards Efficient Generative Large Language Model Serving A Survey from Algorithms to Systems
+  - LLM Inference
+Authors: Xupeng Miao, Gabriele Oliaro, Zhihao Zhang, Xinhao Cheng, Hongyi Jin, Tianqi Chen, Zhihao Jia
+Year: 2023
+Title: Towards Efficient Generative Large Language Model Serving A Survey from Algorithms to Systems
+DOI: 10.48550/arXiv.2312.15234
+Publisher: arXiv
+tags:
+  - 大模型
+  - 模型推理
+  - 模型加速
+---
+
 ## LLM Inference
 
 ---
 
 本文是论文《Towards Efficient Generative Large Language Model Serving: A Survey from Algorithms to Systems》的大部分内容的中文翻译，翻译使用 DeepseekV3 和 GPT-4o-mini 模型。
+
+- **网址链接:** [Open online](http://arxiv.org/abs/2312.15234)
+- **作者:** Xupeng Miao, Gabriele Oliaro, Zhihao Zhang, Xinhao Cheng, Hongyi Jin, Tianqi Chen, Zhihao Jia
+- **引用:** Miao2023
+- **本地pdf:** [2023-Towards Efficient Generative Large Language Model Serving](../../../../asset/LLM/paper/2023-Towards%20Efficient%20Generative%20Large%20Language%20Model%20Serving.pdf)
 
 ### 1. 摘要
 
@@ -267,11 +287,5 @@ LLM推理的另一个独特挑战是**序列的输入长度和输出长度都可
 ---
 
 ## 参考引用
-
-### 书籍出处
-
-- [2023-Towards Efficient Generative Large Language Model Serving](../../../../asset/LLM/paper/2023-Towards%20Efficient%20Generative%20Large%20Language%20Model%20Serving.pdf)
-
-### 网页链接
 
 - [LLM模型部署综述 - 知乎](https://zhuanlan.zhihu.com/p/688282337)
