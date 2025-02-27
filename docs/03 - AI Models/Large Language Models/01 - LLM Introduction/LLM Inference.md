@@ -1,7 +1,18 @@
 
+title: 服务器管理
+date: 2023-07-05 13:32:47
+excerpt: 为啥要做？做完后有何收获感想体会？
+tags: 服务器管理 Linux 
+rating: ⭐⭐⭐⭐
+status: inprogress
+destination: 
+share: false
+obsidianUIMode: source
+---
 
 ## LLM Inference
 
+---
 
 本文是论文《Towards Efficient Generative Large Language Model Serving: A Survey from Algorithms to Systems》的大部分内容的中文翻译，翻译使用 DeepseekV3 和 GPT-4o-mini 模型。
 
