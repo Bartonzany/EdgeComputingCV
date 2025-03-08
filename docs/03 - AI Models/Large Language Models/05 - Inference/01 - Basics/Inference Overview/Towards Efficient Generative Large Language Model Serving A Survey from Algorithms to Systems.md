@@ -1,19 +1,18 @@
 ---
 aliases:
   - Towards Efficient Generative Large Language Model Serving A Survey from Algorithms to Systems
-  - LLM Inference
+  - LLM Inference - Miao2023
 Authors: Xupeng Miao, Gabriele Oliaro, Zhihao Zhang, Xinhao Cheng, Hongyi Jin, Tianqi Chen, Zhihao Jia
 Year: 2023
 Title: Towards Efficient Generative Large Language Model Serving A Survey from Algorithms to Systems
 DOI: 10.48550/arXiv.2312.15234
-Publisher: arXiv
 tags:
-  - 大模型
   - 模型推理
   - 模型加速
+  - 大模型推理
 ---
 
-## LLM Inference
+## Towards Efficient Generative Large Language Model Serving A Survey from Algorithms to Systems
 
 ---
 
@@ -22,7 +21,7 @@ tags:
 - **网址链接:** [Open online](http://arxiv.org/abs/2312.15234)
 - **作者:** Xupeng Miao, Gabriele Oliaro, Zhihao Zhang, Xinhao Cheng, Hongyi Jin, Tianqi Chen, Zhihao Jia
 - **引用:** Miao2023
-- **本地pdf:** [2023-Towards Efficient Generative Large Language Model Serving](../../../../asset/LLM/paper/2023-Towards%20Efficient%20Generative%20Large%20Language%20Model%20Serving.pdf)
+- **本地pdf:** [2023-Towards Efficient Generative Large Language Model Serving](../../../../../../asset/papers/2023-Towards%20Efficient%20Generative%20Large%20Language%20Model%20Serving.pdf)
 
 ### 1. 摘要
 
@@ -111,7 +110,7 @@ $$
 
 现有关于提升LLM服务效率的努力可以大致分为两类，包括**算法创新**和**系统优化**，以下将分别进行讨论。
 
-![](../../../../images/LLM/Pasted%20image%2020250227112134.png)
+![](../../../../../../images/LLM/Pasted%20image%2020250227112134.png)
 
 #### 4.1 算法创新
 
@@ -121,7 +120,7 @@ $$
 
 在本节中，我们回顾了如图2所示的新型解码算法，这些算法优化了LLM的推理过程。这些算法旨在减少计算复杂度，并提升生成任务中语言模型推理的整体效率。
 
-![](../../../../images/LLM/Pasted%20image%2020250227103028.png)
+![](../../../../../../images/LLM/Pasted%20image%2020250227103028.png)
 
 
 - **非自回归解码**
@@ -152,7 +151,7 @@ $$
 
 自注意力计算的一个突出挑战是其**计算复杂度为$O(𝐿^2)$**，与输入序列长度𝐿呈二次方增长。许多Transformer变体被提出，**将标准注意力简化为更高效的替代方案，以应对超长序列任务**，例如**稀疏化、核化和因式分解**。最近，有一种趋势是借鉴先前的注意力简化方法，对其进行泛化和组合，以**缩短上下文并减少KV缓存的大小以及注意力复杂度**，同时略微降低解码质量（例如，**滑动窗口注意力、基于哈希的注意力、扩张注意力**）。其中一类方法是通过**将上下文压缩为更少的软标记**（例如，用**摘要标记**或**地标标记**替换，利用**额外的自编码器方案**）或直接删除或重述不重要的上下文标记，基于不同的重要性指导（或称为**语义压缩**）。例如，**自适应稀疏注意力**采用基于学习的方法，动态消除每个标记的无信息上下文标记。Scissorhands 和 H2O 选择一些可能对未来解码过程有重大影响的重要标记，并保存它们的KV缓存。StreamingLLM 重视初始标记，并通过滑动窗口维护它们，这也与先前的工作类似。FastGen 允许不同的注意力头自适应地采用不同的强调模式。表1展示了四类代表性方法的稀疏注意力模式及其应用。然而，由于上下文不完整，这些方法在实际工作负载中可能面临不可避免的信息丢失，尤其是在注意力分布更复杂的情况下。
   
-![](../../../../images/LLM/Pasted%20image%2020250227104725.png)
+![](../../../../../../images/LLM/Pasted%20image%2020250227104725.png)
 
 - **激活共享**
 
@@ -236,7 +235,7 @@ LLM推理的另一个独特挑战是**序列的输入长度和输出长度都可
 
 生成式大语言模型（LLM）服务需要全方位的优化，近年来许多研究开始开发软件框架，以提供高效的LLM推理部署服务。接下来，我们将回顾这些系统，并对表2中几个代表性的基于GPU的开源LLM服务系统进行全面分析。该分析未包含一些流行的相关项目，包括：1）**针对其他硬件的专门解决方案**（如PopTransformer、CTranslate2、lammap.cpp和ggml）；2）基于其他系统构建的部署解决方案，如OpenLLM（vLLM）、xinference（ggml + vLLM + xFormers）、LMDeploy（FasterTransformer）、gpt-fast（PyTorch）、DeepSpeed-MII和DeepSpeed-FastGen（DeepSpeed-Inference），以及RayLLM和RayServe（vLLM）。我们比较了这些最先进的LLM服务系统，并从多个方面总结了它们的差异。
 
-![](../../../../images/LLM/Pasted%20image%2020250227113353.png)
+![](../../../../../../images/LLM/Pasted%20image%2020250227113353.png)
 
 首先，**大多数系统支持张量并行**，以实现多GPU推理并提升系统性能。其中一些系统还支持**流水线并行或卸载**，以**分别支持多节点或资源受限环境下的推理**。其次，部分系统借鉴了Orca的思想，实现了**迭代级调度**。第三，我们研究了这些系统的注意力核，并分别介绍了它们在初始阶段和增量阶段的实现。在初始阶段，它们通常采用批**量通用矩阵乘法**（GEMM）方法（如cuBLAS、torch、Relay），部分系统还利用**在线softmax技巧**减少高带宽内存（HBM）访问（如Flash-attention、xFormers）。增量阶段更具挑战性，因为逐令牌生成方案导致计算强度较低。为了提高GPU利用率，FasterTransformer手动**将注意力计算（如线性投影、位置偏置、点积、softmax等）融合到一个高性能核模板**中，并采用了多种核优化技术，**如共享内存缓存**、**用于归约的warp-shuffle指令**、支持张量核心和多精度的**半矩阵乘法与累加（HMMA）**。FlexFlow-Serve支持推测解码，并提供了一个基于树的并行解码核，以零内存冗余和最大线程并行度验证来自多个序列（即来自多个小模型或不同波束或并行采样）的推测令牌。vLLM通过**将键值（KV）缓存分页**，扩展了FasterTransformer的融合多头注意力（MHA）核，以消除冗余内存使用，特别是在并行采样场景中。LightLLM则采取了后续方法，将KV缓存划分为更细粒度的令牌级片段。
 
