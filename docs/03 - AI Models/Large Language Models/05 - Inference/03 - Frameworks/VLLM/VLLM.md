@@ -244,3 +244,5 @@ LLM 服务面临独特的挑战：LLM 的输入提示在长度上可能有显著
 - [vllm优化技术速览 - Zhang](https://www.armcvai.cn/2024-10-26/vllm-optimize.html#%E4%B8%80-pagedattention)
 - [PagedAttention论文解读 - 李理的博客](https://fancyerii.github.io/2023/11/01/pagedattention/#%E5%85%B6%E5%AE%83%E8%A7%A3%E7%A0%81%E5%9C%BA%E6%99%AF)
 - [操作系统（八）——虚拟内存、内存分段和内存分页_虚拟内存8个段-CSDN博客](https://blog.csdn.net/www_dong/article/details/115984208)
+- [VLLM推理流程梳理（一） - 知乎](https://zhuanlan.zhihu.com/p/649974825)
+- [VLLM推理流程梳理（二） - 知乎](https://zhuanlan.zhihu.com/p/649977422)
