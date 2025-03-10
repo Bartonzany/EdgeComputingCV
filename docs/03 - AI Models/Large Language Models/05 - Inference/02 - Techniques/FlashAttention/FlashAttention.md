@@ -359,6 +359,9 @@ tensor([[[[-0.5003,  0.7643, -0.2830,  0.5554],
 - [Flash Attention原理详解(含代码讲解) - 知乎](https://zhuanlan.zhihu.com/p/676655352)
 - [FlashAttention v1 论文解读_use flashattention 1.x for turing gpus for now-CSDN博客](https://blog.csdn.net/qq_43592352/article/details/145396305)
 - [[Attention优化][2w字]🔥原理篇: 从Online-Softmax到FlashAttention V1/V2/V3 - 知乎](https://zhuanlan.zhihu.com/p/668888063)
+- [PageAttention代码走读 - 知乎](https://zhuanlan.zhihu.com/p/668736097)
+- [PageAttention V1 核心CUDA源代码阅读 - 知乎](https://zhuanlan.zhihu.com/p/667417423?s_r=0)
+- [Paged Attention V1(vLLM) · Victor's Blog](https://chzhyang.github.io/posts/llm/paged_attention_v1/)
 ### 论文引文
 
 - [flashattn](../../../../../../asset/papers/flashattn.pdf)
