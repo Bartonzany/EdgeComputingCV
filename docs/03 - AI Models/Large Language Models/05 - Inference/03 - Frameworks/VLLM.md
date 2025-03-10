@@ -2,6 +2,7 @@
 aliases:
   - Efficient Memory Management for Large Language Model Serving with PagedAttention
   - VLLM
+  - PageAttention
 Authors: Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, Ion Stoica
 Year: 2023
 Title: Efficient Memory Management for Large Language Model Serving with PagedAttention
@@ -18,6 +19,8 @@ tags:
 - **作者:** Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, Ion Stoica
 - **引用:** Kwon2023
 - **本地pdf:** [2023-Efficient Memory Management for Large Language Model Serving with PagedAttention](../../../../../asset/papers/2023-Efficient%20Memory%20Management%20for%20Large%20Language%20Model%20Serving%20with%20PagedAttention.pdf)
+
+---
 
 ### Abstract
 
@@ -111,14 +114,37 @@ $$
 与传统注意力算法不同，PagedAttention允许将连续的键值对存储于非连续的内存空间中，通过**将每个序列的KV缓存划分为多个KV块**，每个块包含固定数量词元的键值向量，称之为KV块大小（𝐵）。定义键块 $𝐾𝑗 = (𝑘_{(𝑗−1)(𝐵+1)}, ..., 𝑘_{𝑗𝐵})$ 和值块 $𝑉𝑗 = (𝑣_{(𝑗−1)(𝐵+1)}, ..., 𝑣_{𝑗𝐵})$。公式4中的注意力计算可转化为以下分块计算形式：
 
 $$
-𝐴𝑖𝑗 = \frac{\exp(𝑞^⊤_𝑖 𝐾𝑗 / \sqrt{𝑑})}{\sum_{𝑡=1}^{\lceil𝑖/𝐵\rceil} \exp(𝑞^⊤_𝑖 𝐾𝑡1 / \sqrt{𝑑})}, \quad 𝑜𝑖 = \sum_{𝑗=1}^{\lceil𝑖/𝐵\rceil} 𝑉𝑗 𝐴^⊤_{𝑖𝑗},
+𝐴𝑖𝑗 = \frac{\exp(𝑞^⊤_𝑖 𝐾_j / \sqrt{𝑑})}{\sum_{𝑡=1}^{\lceil𝑖/𝐵\rceil} \exp(𝑞^⊤_𝑖 𝐾_𝑡 / \sqrt{𝑑})1}, \quad 𝑜𝑖 = \sum_{𝑗=1}^{\lceil𝑖/𝐵\rceil} 𝑉𝑗 𝐴^⊤_{𝑖𝑗},
 $$
 
 其中，$𝐴𝑖𝑗 = (𝑎_{𝑖,(𝑗−1)(𝐵+1)}, ..., 𝑎_{𝑖,𝑗𝐵})$ 表示第𝑗个KV块上的注意力分数行向量。图5展示了PagedAttention的一个示例：键值向量分布在三个块中，且这些块在物理内存中并不连续。每次计算时，内核将查询词元（如“forth”）的查询向量𝑞𝑖与某个块中的键向量𝐾𝑗（例如块0中的“Four score and seven”键向量）相乘，计算注意力分数𝐴𝑖𝑗，随后将𝐴𝑖𝑗与该块中的值向量𝑉𝑗相乘，得到最终的注意力输出𝑜𝑖。**即一维向量转二维向量的过程**
 
-|                               静态图                               |                               动态图                                |
-|:------------------------------------------------------------------:|:-------------------------------------------------------------------:|
+|                                静态图                                 |                                 动态图                                 |
+| :----------------------------------------------------------------: | :-----------------------------------------------------------------: |
 | ![](../../../../../images/LLM/Pasted%20image%2020250302141020.png) | ![](../../../../../images/LLM/d9eceef6bf0a8107e8a5e468ca1b4bb0.gif) |
+**举例**
+
+假设B=2，i=7，那么 $A_{7,3}$ 是序列中第7个token对第3个块，代入公式得：
+
+$$
+A_{7,3}=\frac{\exp(𝑞^⊤_7 𝐾_3 / \sqrt{𝑑})}{\sum_{𝑡=1}^{\lceil𝑖/𝐵\rceil} \exp(𝑞^⊤_𝑖 𝐾𝑡 / \sqrt{𝑑})1}
+$$
+
+原始Softmax：
+
+$$
+\sum_{t=1}^7 \exp(q_7^\top k_j / \sqrt{d})
+$$
+
+PagedAttention的分母：
+
+$$
+\begin{align}
+&\sum_{𝑡=1}^{4} \exp(𝑞^⊤_7 𝐾_𝑡 / \sqrt{𝑑})1,1\in\mathbb{R}^{B \times 1}=[1,...,1]^T\\
+=&\exp(𝑞^⊤_7 [k_1,k_2] / \sqrt{𝑑})\times[1,1]^T+\exp(𝑞^⊤_7 [k_3,k_4] / \sqrt{𝑑})\times[1,1]^T+\exp(𝑞^⊤_7 [k_5,k_6] / \sqrt{𝑑})\times[1,1]^T+\exp(𝑞^⊤_7 [k_7,k_8] / \sqrt{𝑑})\times[1,1]^T\\
+=&\sum_{t=1}^8 \exp(q_7^\top k_j / \sqrt{d})
+\end{align}
+$$
 
 #### 2. KV缓存管理器
 
@@ -214,5 +240,7 @@ LLM 服务面临独特的挑战：LLM 的输入提示在长度上可能有显著
 
 ### 网页链接
 
-- [[论文笔记]vLLM: Efficient Memory Management for Large Language Model Serving with PagedAttention-CSDN博客](https://blog.csdn.net/yjw123456/article/details/141090361)
+- [vLLM: Efficient Memory Management for Large Language Model Serving with PagedAttention-CSDN博客](https://blog.csdn.net/yjw123456/article/details/141090361)
 - [vllm优化技术速览 - Zhang](https://www.armcvai.cn/2024-10-26/vllm-optimize.html#%E4%B8%80-pagedattention)
+- [PagedAttention论文解读 - 李理的博客](https://fancyerii.github.io/2023/11/01/pagedattention/#%E5%85%B6%E5%AE%83%E8%A7%A3%E7%A0%81%E5%9C%BA%E6%99%AF)
+- [操作系统（八）——虚拟内存、内存分段和内存分页_虚拟内存8个段-CSDN博客](https://blog.csdn.net/www_dong/article/details/115984208)
