@@ -41,7 +41,7 @@ Continuous Batching 打破了传统静态批处理的固有模式。传统的静
 
 大模型推理分为两部分 prefill 和 generation，如下图所示：
 
-![](../../../../../../images/LLM/Pasted%20image%2020250311211408.png)
+![](../../../../../images/LLM/Pasted%20image%2020250311211408.png)
 
 - Prefill 阶段：在进行生成之前大模型需要输入的 prompt，所以第一步 T1 是 Prefill 阶段，黄色部分即为模型的输入
 - Generation 阶段：T2，T3，T4，END 红色为模型的结束序列标记。
@@ -55,13 +55,13 @@ Continuous Batching 打破了传统静态批处理的固有模式。传统的静
 
 #### 朴素批处理 Naive batching
 
-![](../../../../../../images/LLM/Pasted%20image%2020250311213217.png)
+![](../../../../../images/LLM/Pasted%20image%2020250311213217.png)
 
 如上图所示，在第一遍迭代（左）中，每个序列从Prompt（黄）中生成一个标记（蓝色），经过几轮迭代完成所有序列生成。这种方式会很明显造成内存碎片，白色部分的显存虽然可能当前阶段不会用到甚至可能永远生成结束也不会用到，但是仍然会申请这部分显存。
 
 #### 连续批处理 continuous batching
 
-![](../../../../../../images/LLM/Pasted%20image%2020250311220146.png)
+![](../../../../../images/LLM/Pasted%20image%2020250311220146.png)
 
 每次 prefill 或者 generation 之前都会进行一次 batching， 图中阴影部分为未使用的显存。  
 
