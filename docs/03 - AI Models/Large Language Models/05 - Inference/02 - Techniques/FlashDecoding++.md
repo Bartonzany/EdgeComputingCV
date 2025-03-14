@@ -75,8 +75,9 @@ $$
 
 FlashDecoding++最主要的创新点，在于提出了基于统一max值的异步softmax。我们知道，safe-softmax的计算公式中，需要先求每行x的最大值，然后减去这个max(x)之后，再做softmax以防止数值溢出。
 
-$$\begin{aligned}
-\operatorname{softmax}(x) & =\frac{\left[e^{x_{1}-m(x)}, \ldots, e^{x_{d}-m(x)}\right]}{\sum_{i} e^{x_{i}-m(x)}} \\
+$$
+\begin{aligned}
+\text{softmax}(x) & =\frac{\left[e^{x_{1}-m(x)}, \ldots, e^{x_{d}-m(x)}\right]}{\sum_{i} e^{x_{i}-m(x)}} \\
 & =\frac{\left[e^{x_{1}-\phi}, \ldots, e^{x_{d}-\phi}\right]}{\sum_{i} e^{x_{i}-\phi}}, \forall \phi \in \mathbb{R}
 \end{aligned}
 $$
@@ -98,32 +99,56 @@ $$
 
 #### 双Buffer Flat GEMM
 
+![](../../../../../images/LLM/Pasted%20image%2020250313211301.png)
+
+```C++
+for (int i = 0; i < m; i++) {           // 遍历 A 的行
+    for (int j = 0; j < n; j++) {       // 遍历 B 的列
+        for (int p = 0; p < k; p++) {   // 遍历 A 的列和 B 的行
+            C[i][j] += A[i][p] * B[p][j];
+        }
+    }
+}
+```
+
+- 计算操作数：其中M、N、K分别为3层循环次数，2为最内层循环的1次乘法和1次加法；
+  
+  $$
+  M*N*(k+k-1)+N*M=2*M*N*K
+  $$
+
+ - 内存访存量：4MNK，其中M、N、K分别为3层循环次数，4为最内层循环中对C、A、B中元素的内存访问次数
+
+假设 GEMM 中两个相乘的矩阵大小分别为 M * K 和 K * N，同时每个 GEMM Tile 会对 K * N 的矩阵进行分块，每块大小为 Bn * Bk （不足则进行填充），那么每个 GEMM Tile的计算量为 $2MB_nB_k$，内存访问量为 $M * B_k + B_n * B_k$，共有 $N * K / B_n * B_k$ 块。算上把乘法结果写入的内存访问，整个 GEMM 过程中计算与内存的比值为：
+
+$$
+\frac{2 \ast M \ast B_n \ast B_k \ast \frac{N + K}{B_n \ast B_k}}
+{(M \ast B_k + B_n \ast B_k) \ast \frac{N + K}{B_n \ast B_k} + M \ast N}
+= \frac{2 \ast M \ast K}{K + \frac{M \ast K}{B_n} + M}
+$$
 
 
 
+![](../../../../../images/LLM/Pasted%20image%2020250313211244.png)
+
+于是作者发现了：计算和内存比与$B_N$正相关，而并行度与$B_N$负相关。下图展示了GEMM在不同 $B_N$ 和N下的性能（归一化后）。本文总结了两个关键结论：
+
+![](../../../../../images/LLM/Pasted%20image%2020250313213123.png)
+
+1. 当 N 较小时，flat GEMM是parallelism-bounded。NVIDIA Tesla A100中有108个Streaming Multiprocessors (SMs)，于是应该将B_N设置为一个相关的数（128或256）
+2. 当 N 较大时，flat GEMM是memory-bounded。通过隐藏memory access latency可以提高性能。
 
 ### Evaluation
 
-#### 1、实验设置
+![](../../../../../images/LLM/Pasted%20image%2020250313213841.png)
 
-**数据集**：
-**Batch Size**：
-**优化器**：
-**Epoch**：
-**数据增强**：
-**Baseline**：
-**激活函数**：
-**学习率**：
-**衰减率**：
-**框架**：
-**平台**：
-
-#### 2、实验结果
+![](../../../../../images/LLM/Pasted%20image%2020250313213932.png)
 
 
 
 ### Conclusion
 
+FlashDecoding++提出了具有统一最大值的异步softmax、具有双缓冲的平面GEMM优化和具有硬件资源自适应的启发式数据流三种新颖设计。FlashDecoding++在主流llm和硬件上均取得了有效的加速效果：
 
 ### ExampleWithCode
 
@@ -138,7 +163,10 @@ $$
 ### 网页链接
 
 - [🔥原理&图解FlashDecoding/FlashDecoding++ - 知乎](https://zhuanlan.zhihu.com/p/696075602)
-- 
+- [大模型推理加速之FlashDecoding++：野生Flash抵达战场 - 知乎](https://zhuanlan.zhihu.com/p/665361668)
+- [[论文分享]LLM推理加速——FLASHDECODING++_vllm flash-CSDN博客](https://blog.csdn.net/bmfire/article/details/134599948)
+- [GPU语言模型加速：FlashDecoding+的并行softmax优化,-CSDN博客](https://blog.csdn.net/ymk1998/article/details/134397471)
+- [FlashDecoding++_flash decoding-CSDN博客](https://blog.csdn.net/yzsjwd/article/details/134403397)
 
 ### 论文引文
 
