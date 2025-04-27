@@ -1734,7 +1734,7 @@ void transformMatrix2D_CPU(float *MatA, float *MatB, int nx, int ny) {
 
 矩阵转置操作中，内存访问模式的选择直接影响性能。以下是比较两种常见的读取方式：
 
-![](../../../images/Professional%20CUDA%20C%20Programming/Pasted%20image%2020250426211612.png)
+![](../../../images/Professional%20CUDA%20C%20Programming/Matrix%20Access.png)
 
 - **按行读取（Row-wise Read）**：按行读取时，**数据访问是连续的**，符合 **合并访问（Coalesced Access）** 的要求。这种模式下，GPU可以高效地从全局内存加载数据。
 - **按列读取（Column-wise Read）**：按列读取时，**数据访问是非连续的**，属于** 交叉访问（Strided Access）**。这种模式下，每次读取的数据分布在不同的内存地址上。
