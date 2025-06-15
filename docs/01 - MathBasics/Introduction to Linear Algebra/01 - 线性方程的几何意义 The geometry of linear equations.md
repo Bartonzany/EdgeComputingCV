@@ -218,7 +218,8 @@ $$
 **反例**：若三个向量在同一平面内，比如三个列向量分别为：
 
 $$
-\begin{bmatrix} 2 \\ -1 \\ 0 \end{bmatrix}, \quad \begin{bmatrix} -1 \\ 2 \\ -3 \end{bmatrix}, \quad \begin{bmatrix} 1 \\ 1 \\ -3 \end{bmatrix}.
+\begin{bmatrix} 2 \\ 
+-1 \\ 0 \end{bmatrix}, \quad \begin{bmatrix} -1 \\ 2 \\ -3 \end{bmatrix}, \quad \begin{bmatrix} 1 \\ 1 \\ -3 \end{bmatrix}.
 $$
 
 其中 $\begin{bmatrix} 1 \\ 1 \\ -3 \end{bmatrix}=\begin{bmatrix} 2 \\ -1 \\ 0 \end{bmatrix}+ \begin{bmatrix} -1 \\ 2 \\ -3 \end{bmatrix}$，这三个向量构成了一个平面。矩阵 $A = \begin{bmatrix} 2 & -1 & 1 \\ -1 & 2 & 1 \\ 0 & -3 & -3 \end{bmatrix}$ 构成的方程 $Ax=b$ 中 b 无法覆盖整个三维空间，**即 b 不在该平面内，三个列向量无论怎么组合也得不到平面外的向量 b**。
