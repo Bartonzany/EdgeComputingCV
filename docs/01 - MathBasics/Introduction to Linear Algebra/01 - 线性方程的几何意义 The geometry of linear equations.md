@@ -72,7 +72,10 @@ $$
 在列图像中，将系数矩阵写成列向量的形式，则求解原方程变为寻找列向量的 **线性组合（linear combination）** 来构成向量**b**。
 
 $$
-x \begin{bmatrix} 2 \\ -1 \end{bmatrix} + y \begin{bmatrix} -1 \\ 2 \end{bmatrix} = \begin{bmatrix} 0 \\ 3 \end{bmatrix}
+x \begin{bmatrix} 2 \\ 
+-1 \end{bmatrix} + y \begin{bmatrix} -1 \\ 
+2 \end{bmatrix} = \begin{bmatrix} 0 \\ 
+3 \end{bmatrix}
 $$
 
 **向量线性组合**是贯穿线性代数的重要概念。对于给定的向量 **c** 和 **d** 以及标量 _x_ 和 _y_ ，我们将 _x_**c**+_y_**d** 称之为 **c** 和 **d** 的一个线性组合。
