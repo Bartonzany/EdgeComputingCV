@@ -26,12 +26,7 @@ tags:
 线性代数的基本问题就是解 n 元一次方程组。例如：二元一次方程组
 
 $$
-\left\{
-\begin{aligned}
-2x - y &= 0 \\
--x + 2y &= 3
-\end{aligned}
-\right.
+\left\{ \begin{aligned} 2x - y &= 0 \\ -x + 2y &= 3 \end{aligned} \right.
 $$
 
 将方程写为矩阵形式就是：
@@ -181,6 +176,7 @@ $$
 	7 
 	\end{bmatrix}.
   $$
+  
 - **行图像**：将矩阵 A 的行向量和 x 向量进行点积来计算：
   $$
   \begin{bmatrix} 
