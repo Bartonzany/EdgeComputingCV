@@ -26,7 +26,12 @@ tags:
 线性代数的基本问题就是解 n 元一次方程组。例如：二元一次方程组
 
 $$
-\left\{ \begin{aligned} 2x - y &= 0 \\ -x + 2y &= 3 \end{aligned} \right.
+\left\{
+\begin{aligned}
+2x - y &= 0 \\
+-x + 2y &= 3
+\end{aligned}
+\right.
 $$
 
 将方程写为矩阵形式就是：
@@ -46,7 +51,7 @@ y
 \end{bmatrix}
 $$
 
-其中 $A=\begin{bmatrix}2 & -1 \\-1 & 2\end{bmatrix}$ 被称为 **系数矩阵（coefficient matrix）**
+其中 $A=\begin{bmatrix}2 & -1 \\-1 & 2 \end{bmatrix}$ 被称为 **系数矩阵（coefficient matrix）**
 
 未知数向量通常记为 $x=\begin{bmatrix} x \\ y \end{bmatrix}$
 
