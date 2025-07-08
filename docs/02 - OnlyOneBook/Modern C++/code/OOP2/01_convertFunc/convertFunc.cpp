@@ -34,7 +34,7 @@ int main() {
     Fraction f2 = f1 + 4;    // 调用函数2，即重载的运算符 +，将 Fraction 对象与整数相加
     // double d = f1 + 4;         // 调用函数3，即隐式类型转换，将 Fraction 对象转换为 double，编译歧义
 
-    printf("f2 = %f\n", (double)f2);
+    printf("f2 = %f\n", (double)f2); // 调用函数4，即显式类型转换，将 Fraction 对象转换为 double
     // printf("d = %f\n", d);
     return 0;
 }
