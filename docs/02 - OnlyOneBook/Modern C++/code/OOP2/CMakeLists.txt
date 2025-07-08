@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 Project(OOP2 LANGUAGES CXX C)
 
-add_subdirectory(01 - convertFunc)
+add_subdirectory(01_convertFunc)
 # add_subdirectory(ptrClass)
 # add_subdirectory(funcClass)
 # add_subdirectory(reference)
