@@ -5,27 +5,28 @@
 using namespace std;
 
 class Student {
-public:
-    Student(const string& name, int age) : name(name), age(age) {
-        cout << "Student " << name << " created." << endl;
-    }
+    public:
+        Student(const string &name, int age):
+            name(name), age(age) {
+            cout << "Student " << name << " created." << endl;
+        }
 
-    ~Student() {
-        cout << "Student " << name << " destroyed." << endl;
-    }
+        ~Student() {
+            cout << "Student " << name << " destroyed." << endl;
+        }
 
-    void display() const {
-        cout << "Name: " << name << ", Age: " << age << endl;
-    }
+        void display() const {
+            cout << "Name: " << name << ", Age: " << age << endl;
+        }
 
-private:
-    string name;
-    int age;
+    private:
+        string name;
+        int    age;
 };
 
 int main() {
     shared_ptr<Student> studentPtr(new Student("Alice", 20));
-    
+
     studentPtr->display();
 
     // 共享指针
