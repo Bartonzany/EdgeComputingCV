@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
-project(DyBinding 
+project(09_Binding 
                 VERSION 1.0 
-                DESCRIPTION "use of DyBinding"
+                DESCRIPTION "use of Binding"
                 LANGUAGES C CXX)  
 
 set(CMAKE_CXX_STANDARD 14)              # 设置使用的C++标准，11 14 17
@@ -11,7 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # 生成编译命令文件，ON/OFF
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)  # 设置工程文件夹, 要求在build文件夹内仍然保持相应的文件夹结构
 
-add_executable(DyBinding DyBinding.cpp)
+add_executable(09_Binding Binding.cpp)
 
 target_include_directories(${PROJECT_NAME} PUBLIC
     .
@@ -33,4 +33,4 @@ if(PROJECT_BINARY_DIR STREQUAL PROJECT_SOURCE_DIR)
     message(FATAL_ERROR "The binary directory cannot be the same as source directory")
 endif()
 
-install(TARGETS DyBinding DESTINATION OOP2)
+install(TARGETS 09_Binding DESTINATION OOP2)

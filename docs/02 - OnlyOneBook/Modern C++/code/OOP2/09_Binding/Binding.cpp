@@ -30,12 +30,12 @@ int main() {
     Base*     b  = new Derived1();
     Derived2* d2 = new Derived2();
     Base*     b2 = d2;
-    Base* b3 = new Derived1()
+    Base*     b3 = new Derived1();
 
-    b->show();              // 动态绑定，输出 Derived1 class show function
-    d2->show();             // 动态绑定，输出 Derived2 class show function
-    b2->show();             // 动态绑定，输出 Derived2 class show function
-    b3->Base::show();       // 静态绑定，输出 Base class show function
+    b->show();           // 动态绑定，输出 Derived1 class show function
+    d2->show();          // 动态绑定，输出 Derived2 class show function
+    b2->show();          // 动态绑定，输出 Derived2 class show function
+    b3->Base::show();    // 静态绑定，输出 Base class show function
 
     delete b;
     delete d2;
