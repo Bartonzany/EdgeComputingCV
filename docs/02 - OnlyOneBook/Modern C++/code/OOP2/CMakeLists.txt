@@ -3,7 +3,7 @@ Project(OOP2 LANGUAGES CXX C)
 
 add_subdirectory(01_convertFunc)
 add_subdirectory(02_ptrClass)
-# add_subdirectory(funcClass)
+add_subdirectory(03_funcClass)
 # add_subdirectory(reference)
 # add_subdirectory(override)
 # add_subdirectory(DyBinding)
