@@ -13,7 +13,7 @@ int main() {
     cout << "Size of x (double): " << sizeof(x) << endl;                     // 8 (double 的大小)
     cout << "Size of p (pointer to double): " << sizeof(p) << endl;          // 4 (指针的大小，通常是 4 字节)
     cout << "Size of r (reference to double): " << sizeof(r) << endl;        // 8 (引用 r 的大小与 x 相同)
- 
+    
     cout << "Address of x (p): " << p << endl;                               // 0065FDFC (x 的地址)
     cout << "Value of x through p: " << *p << endl;                          // 0 (通过指针访问 x 的值)
     cout << "Value of x directly: " << x << endl;                            // 0 (直接访问 x 的值)

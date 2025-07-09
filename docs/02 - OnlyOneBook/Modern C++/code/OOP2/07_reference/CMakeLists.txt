@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
-project(reference 
+project(07_reference 
                 VERSION 1.0 
                 DESCRIPTION "use of reference"
                 LANGUAGES C CXX)  
@@ -11,7 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # 生成编译命令文件，ON/OFF
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)  # 设置工程文件夹, 要求在build文件夹内仍然保持相应的文件夹结构
 
-add_executable(reference reference.cpp)
+add_executable(07_reference reference.cpp)
 
 target_include_directories(${PROJECT_NAME} PUBLIC
     .
@@ -33,4 +33,4 @@ if(PROJECT_BINARY_DIR STREQUAL PROJECT_SOURCE_DIR)
     message(FATAL_ERROR "The binary directory cannot be the same as source directory")
 endif()
 
-install(TARGETS reference DESTINATION OOP2)
+install(TARGETS 07_reference DESTINATION OOP2)
