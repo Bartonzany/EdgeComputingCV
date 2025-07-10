@@ -3,4 +3,5 @@ Project(OOP3 LANGUAGES CXX C)
 
 add_subdirectory(01_auto)
 add_subdirectory(02_Uniform_Initialization)
+add_subdirectory(03_Initialization_List)
 # add_subdirectory(1VariadicTemplates)
